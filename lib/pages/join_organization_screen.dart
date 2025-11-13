@@ -11,8 +11,13 @@ class JoinOrganizationScreen extends StatefulWidget {
 }
 
 class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
-  static const Color primaryColor = Color(0xFF6366F1);
-  static const Color secondaryColor = Color(0xFF8B5CF6);
+  // Color Scheme - Matching Signup Screen
+  static const Color primaryColor = Color(0xFF1A1A1A);
+  static const Color backgroundColor = Color(0xFFE8F4F8);
+  static const Color textPrimary = Color(0xFF000000);
+  static const Color textSecondary = Color(0xFF666666);
+  static const Color inputFillColor = Color(0xFFF5F5F5);
+  static const Color accentColor = Color(0xFF00A3E0);
 
   final TextEditingController _invCodeController = TextEditingController();
 
@@ -80,7 +85,6 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
           .maybeSingle();
 
       if (existingOrgMember != null && mounted) {
-        // User already has organization - redirect
         final orgName = existingOrgMember['organizations']?['name'] ?? 'an organization';
         
         debugPrint('✓ User already has organization: $orgName');
@@ -98,14 +102,12 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
         
         debugPrint('Should navigate to MainDashboard');
       } else {
-        // User doesn't have organization - show join form
         if (mounted) {
           setState(() => _isInitializing = false);
         }
       }
     } catch (e) {
       debugPrint('❌ Error initializing screen: $e');
-      // Show form even on error
       if (mounted) {
         setState(() => _isInitializing = false);
       }
@@ -128,7 +130,7 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
         throw Exception('User tidak terautentikasi');
       }
 
-      // STEP 1: Check if already member (double-check)
+      // STEP 1: Check if already member
       debugPrint('Step 1: Checking existing organization membership...');
       final existingOrgMember = await Supabase.instance.client
           .from('organization_members')
@@ -138,7 +140,6 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
           .maybeSingle();
 
       if (existingOrgMember != null) {
-        // User already has organization - redirect
         debugPrint('✓ User already has organization - redirecting');
 
         final orgName = existingOrgMember['organizations']?['name'] ?? 'an organization';
@@ -151,11 +152,6 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
           if (!mounted) return;
 
           // TODO: Uncomment setelah buat MainDashboard
-          // Navigator.of(context).pushAndRemoveUntil(
-          //   MaterialPageRoute(builder: (context) => const MainDashboard()),
-          //   (route) => false,
-          // );
-          
           debugPrint('Should navigate to MainDashboard');
         }
         return;
@@ -190,11 +186,9 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
 
       if (existingMemberInOrg != null) {
         if (existingMemberInOrg['is_active'] == true) {
-          // Already active member
           debugPrint('⚠️ User is already an active member of this organization');
           throw Exception('Anda sudah tergabung di organisasi ini');
         } else {
-          // Re-activate if exists but is_active = false
           debugPrint('Step 3b: Reactivating existing membership...');
           await Supabase.instance.client
               .from('organization_members')
@@ -205,7 +199,7 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
               })
               .eq('id', existingMemberInOrg['id']);
 
-          debugPrint('✓ Re-activated existing membership with work_location: field');
+          debugPrint('✓ Re-activated existing membership');
         }
       } else {
         // STEP 4: Insert new member
@@ -219,26 +213,12 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
           'is_active': true,
         });
 
-        debugPrint('✓ Created new organization membership with work_location: field');
+        debugPrint('✓ Created new organization membership');
       }
 
-      // STEP 5: Success - navigate to dashboard
+      // STEP 5: Success
       if (mounted) {
-        _showSnackBar('Berhasil bergabung dengan $orgName!', true);
-
-        await Future.delayed(const Duration(milliseconds: 800));
-
-        if (!mounted) return;
-
-        debugPrint('Navigating to MainDashboard...');
-        
-        // TODO: Uncomment setelah buat MainDashboard
-        // Navigator.of(context).pushAndRemoveUntil(
-        //   MaterialPageRoute(builder: (context) => const MainDashboard()),
-        //   (route) => false,
-        // );
-        
-        _showSnackBar('Success! (MainDashboard belum dibuat)', true);
+        _showSuccessDialog(orgName);
       }
     } catch (e) {
       debugPrint('❌ Error joining organization: $e');
@@ -265,35 +245,190 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
     }
   }
 
+  void _showSuccessDialog(String orgName) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Container(
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF10B981).withOpacity(0.3),
+                        blurRadius: 20,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.check_circle,
+                    size: 48,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                  'Berhasil Bergabung! 🎉',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: textPrimary,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Anda telah bergabung dengan\n$orgName',
+                  style: const TextStyle(
+                    fontSize: 15,
+                    color: textSecondary,
+                    height: 1.5,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 32),
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      // TODO: Navigate to dashboard
+                      _showSnackBar('MainDashboard belum dibuat', true);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: primaryColor,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(26),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: const Text(
+                      'Lanjutkan',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _handleLogout() async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Konfirmasi Logout'),
-        content: const Text('Apakah Anda yakin ingin keluar?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text(
-              'Batal',
-              style: TextStyle(color: Colors.grey),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.logout_rounded,
+                  color: Colors.red.shade600,
+                  size: 30,
+                ),
               ),
-            ),
-            child: const Text(
-              'Logout',
-              style: TextStyle(color: Colors.white),
-            ),
+              const SizedBox(height: 20),
+              const Text(
+                'Konfirmasi Logout',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: textPrimary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Apakah Anda yakin ingin keluar?',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: textSecondary,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        side: BorderSide(color: Colors.grey.shade300),
+                      ),
+                      child: const Text(
+                        'Batal',
+                        style: TextStyle(
+                          color: textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 0,
+                      ),
+                      child: const Text(
+                        'Logout',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
 
@@ -322,7 +457,7 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: isSuccess ? Colors.green : Colors.red,
+        backgroundColor: isSuccess ? const Color(0xFF10B981) : Colors.red,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         margin: const EdgeInsets.all(16),
@@ -333,418 +468,399 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
   @override
   Widget build(BuildContext context) {
     final displayName = _displayName ?? 'User';
+    final screenHeight = MediaQuery.of(context).size.height;
     final screenWidth = MediaQuery.of(context).size.width;
-
+    
     // Responsive sizing
-    final bool isSmallPhone = screenWidth < 360;
-    final bool isMobile = screenWidth < 600;
-    final bool isTablet = screenWidth >= 600 && screenWidth < 1024;
-
-    final double horizontalPadding = isSmallPhone ? 16 : (isMobile ? 20 : (isTablet ? 40 : 60));
-    final double verticalPadding = isSmallPhone ? 12 : 20;
-    final double logoSize = isSmallPhone ? 50 : (isMobile ? 60 : 70);
-    final double avatarRadius = isSmallPhone ? 32 : (isMobile ? 40 : 48);
-    final double titleFontSize = isSmallPhone ? 18 : (isMobile ? 22 : 26);
-    final double subtitleFontSize = isSmallPhone ? 12 : (isMobile ? 14 : 15);
-    final double cardPadding = isSmallPhone ? 20 : (isMobile ? 24 : 32);
-    final double maxCardWidth = isTablet ? 600 : 500;
-
+    final isSmallScreen = screenHeight < 700;
+    final isTablet = screenWidth > 600;
+    
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: _isInitializing
-            ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(primaryColor),
-                      strokeWidth: 3,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Memuat...',
-                      style: TextStyle(
-                        color: Colors.grey.shade600,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-              )
-            : Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      primaryColor.withOpacity(0.08),
-                      secondaryColor.withOpacity(0.04),
-                    ],
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.bottomCenter,
+            end: Alignment.topCenter,
+            colors: [
+              Colors.white,
+              Color.fromARGB(255, 120, 210, 240),
+            ],
+            stops: [0.20, 1.0],
+          ),
+        ),
+        child: SafeArea(
+          child: _isInitializing
+              ? const Center(
+                  child: CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(primaryColor),
+                    strokeWidth: 3,
                   ),
-                ),
-                child: Center(
-                  child: SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: horizontalPadding,
-                        vertical: verticalPadding,
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          // Logout button
-                          Align(
-                            alignment: Alignment.topRight,
+                )
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    return SingleChildScrollView(
+                      physics: const ClampingScrollPhysics(),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minHeight: constraints.maxHeight,
+                        ),
+                        child: IntrinsicHeight(
+                          child: Center(
                             child: Container(
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: _isJoining
-                                      ? [Colors.grey.shade300, Colors.grey.shade400]
-                                      : [Colors.red.shade400, Colors.red.shade600],
-                                ),
-                                borderRadius: BorderRadius.circular(12),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: _isJoining
-                                        ? Colors.grey.withOpacity(0.2)
-                                        : Colors.red.withOpacity(0.3),
-                                    blurRadius: 12,
-                                    offset: const Offset(0, 4),
-                                  ),
-                                ],
+                              constraints: BoxConstraints(
+                                maxWidth: isTablet ? 500 : double.infinity,
                               ),
-                              child: Material(
-                                color: Colors.transparent,
-                                child: InkWell(
-                                  onTap: _isJoining ? null : _handleLogout,
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Padding(
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: isSmallPhone ? 12 : 16,
-                                      vertical: isSmallPhone ? 8 : 10,
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          Icons.logout_rounded,
-                                          color: Colors.white,
-                                          size: isSmallPhone ? 18 : 20,
-                                        ),
-                                        SizedBox(width: isSmallPhone ? 6 : 8),
-                                        Text(
-                                          'Logout',
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontSize: isSmallPhone ? 13 : 14,
-                                            fontWeight: FontWeight.w700,
-                                            letterSpacing: 0.3,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
+                              padding: EdgeInsets.symmetric(
+                                horizontal: isTablet ? 40 : 24,
+                                vertical: isSmallScreen ? 12 : 16,
                               ),
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-
-                          // Logo
-                          Container(
-                            width: logoSize,
-                            height: logoSize,
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                                colors: [primaryColor, secondaryColor],
-                              ),
-                              borderRadius: BorderRadius.circular(logoSize * 0.3),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: primaryColor.withOpacity(0.3),
-                                  blurRadius: 15,
-                                  offset: const Offset(0, 8),
-                                ),
-                              ],
-                            ),
-                            child: Icon(
-                              Icons.business,
-                              color: Colors.white,
-                              size: logoSize * 0.53,
-                            ),
-                          ),
-
-                          SizedBox(height: isSmallPhone ? 16 : 24),
-
-                          // Main Card
-                          Container(
-                            constraints: BoxConstraints(maxWidth: maxCardWidth),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(isSmallPhone ? 20 : 24),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.08),
-                                  blurRadius: 20,
-                                  offset: const Offset(0, 8),
-                                ),
-                              ],
-                            ),
-                            padding: EdgeInsets.all(cardPadding),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                // Avatar
-                                Container(
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                      colors: [
-                                        primaryColor.withOpacity(0.2),
-                                        secondaryColor.withOpacity(0.1),
-                                      ],
-                                    ),
-                                  ),
-                                  child: CircleAvatar(
-                                    radius: avatarRadius,
-                                    backgroundColor: Colors.transparent,
-                                    backgroundImage: _profilePhotoUrl != null
-                                        ? NetworkImage(_profilePhotoUrl!)
-                                        : null,
-                                    child: _profilePhotoUrl == null
-                                        ? Icon(
-                                            Icons.person,
-                                            color: primaryColor,
-                                            size: avatarRadius * 1,
-                                          )
-                                        : null,
-                                  ),
-                                ),
-
-                                SizedBox(height: isSmallPhone ? 12 : 16),
-
-                                // Welcome text
-                                Text(
-                                  'Selamat Datang Kembali, $displayName!',
-                                  style: TextStyle(
-                                    fontSize: titleFontSize,
-                                    fontWeight: FontWeight.w800,
-                                    color: Colors.black87,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-
-                                const SizedBox(height: 8),
-
-                                Text(
-                                  'Bergabung dengan organisasi untuk melanjutkan',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: Colors.grey.shade600,
-                                    fontSize: subtitleFontSize,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-
-                                SizedBox(height: isSmallPhone ? 20 : 24),
-
-                                // Invitation code field
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Kode Undangan',
-                                      style: TextStyle(
-                                        fontSize: isSmallPhone ? 13 : 14,
-                                        fontWeight: FontWeight.w700,
-                                        color: Colors.black87,
-                                        letterSpacing: 0.5,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 10),
-                                    TextField(
-                                      controller: _invCodeController,
-                                      enabled: !_isJoining,
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        fontSize: isSmallPhone ? 18 : 20,
-                                        fontWeight: FontWeight.w700,
-                                        letterSpacing: isSmallPhone ? 2 : 4,
-                                        color: Colors.black87,
-                                      ),
-                                      decoration: InputDecoration(
-                                        hintText: 'ENTER-CODE',
-                                        hintStyle: TextStyle(
-                                          color: Colors.grey.shade400,
-                                          letterSpacing: isSmallPhone ? 2 : 4,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                        filled: true,
-                                        fillColor: Colors.grey.shade50,
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(14),
-                                          borderSide: BorderSide.none,
-                                        ),
-                                        enabledBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(14),
-                                          borderSide: BorderSide(
-                                            color: Colors.grey.shade200,
-                                            width: 2,
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  // Top section: Logout button
+                                  Align(
+                                    alignment: Alignment.topRight,
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(12),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withOpacity(0.1),
+                                            blurRadius: 10,
+                                            offset: const Offset(0, 2),
                                           ),
-                                        ),
-                                        focusedBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(14),
-                                          borderSide: const BorderSide(
-                                            color: primaryColor,
-                                            width: 2.5,
-                                          ),
-                                        ),
-                                        disabledBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(14),
-                                          borderSide: BorderSide(
-                                            color: Colors.grey.shade200,
-                                            width: 2,
-                                          ),
-                                        ),
-                                        contentPadding: EdgeInsets.symmetric(
-                                          vertical: isSmallPhone ? 14 : 16,
-                                          horizontal: isSmallPhone ? 16 : 20,
-                                        ),
+                                        ],
                                       ),
-                                      textCapitalization: TextCapitalization.characters,
-                                      onSubmitted: _isJoining
-                                          ? null
-                                          : (value) => _joinOrganizationWithCode(),
-                                    ),
-                                  ],
-                                ),
-
-                                const SizedBox(height: 16),
-
-                                // Info box
-                                Container(
-                                  padding: EdgeInsets.all(isSmallPhone ? 10 : 12),
-                                  decoration: BoxDecoration(
-                                    color: Colors.blue.shade50,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: Colors.blue.shade200,
-                                      width: 1,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.info_rounded,
-                                        color: Colors.blue.shade700,
-                                        size: isSmallPhone ? 18 : 20,
-                                      ),
-                                      SizedBox(width: isSmallPhone ? 8 : 10),
-                                      Expanded(
-                                        child: Text(
-                                          'Tanyakan kode undangan ke HR atau admin organisasi Anda',
-                                          style: TextStyle(
-                                            color: Colors.blue.shade900,
-                                            fontSize: isSmallPhone ? 11 : 12,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-
-                                SizedBox(height: isSmallPhone ? 20 : 24),
-
-                                // Join button
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      gradient: const LinearGradient(
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                        colors: [primaryColor, secondaryColor],
-                                      ),
-                                      borderRadius: BorderRadius.circular(14),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: primaryColor.withOpacity(0.4),
-                                          blurRadius: 10,
-                                          offset: const Offset(0, 4),
-                                        ),
-                                      ],
-                                    ),
-                                    child: ElevatedButton(
-                                      onPressed: _isJoining
-                                          ? null
-                                          : _joinOrganizationWithCode,
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.transparent,
-                                        disabledBackgroundColor: Colors.grey.shade300,
-                                        disabledForegroundColor: Colors.grey.shade600,
-                                        padding: EdgeInsets.symmetric(
-                                          vertical: isSmallPhone ? 14 : 16,
-                                        ),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(14),
-                                        ),
-                                        elevation: 0,
-                                        shadowColor: Colors.transparent,
-                                      ),
-                                      child: _isJoining
-                                          ? SizedBox(
-                                              width: isSmallPhone ? 20 : 24,
-                                              height: isSmallPhone ? 20 : 24,
-                                              child: const CircularProgressIndicator(
-                                                strokeWidth: 3,
-                                                valueColor: AlwaysStoppedAnimation<Color>(
-                                                  Colors.white,
-                                                ),
-                                              ),
-                                            )
-                                          : Row(
-                                              mainAxisAlignment: MainAxisAlignment.center,
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        child: InkWell(
+                                          onTap: _isJoining ? null : _handleLogout,
+                                          borderRadius: BorderRadius.circular(12),
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 16,
+                                              vertical: 10,
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
                                               children: [
                                                 Icon(
-                                                  Icons.business_center,
-                                                  size: isSmallPhone ? 18 : 20,
-                                                  color: Colors.white,
+                                                  Icons.logout_rounded,
+                                                  color: _isJoining ? Colors.grey : Colors.red,
+                                                  size: 18,
                                                 ),
-                                                SizedBox(width: isSmallPhone ? 8 : 10),
+                                                const SizedBox(width: 6),
                                                 Text(
-                                                  'Bergabung dengan Organisasi',
+                                                  'Logout',
                                                   style: TextStyle(
-                                                    fontSize: isSmallPhone ? 14 : 16,
-                                                    fontWeight: FontWeight.w700,
-                                                    letterSpacing: 0.5,
-                                                    color: Colors.white,
+                                                    color: _isJoining ? Colors.grey : Colors.red,
+                                                    fontSize: 14,
+                                                    fontWeight: FontWeight.w600,
                                                   ),
                                                 ),
                                               ],
                                             ),
+                                          ),
+                                        ),
+                                      ),
                                     ),
                                   ),
-                                ),
-                              ],
+                                  
+                                  // Middle section: Header + Card
+                                  Expanded(
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        _buildHeader(displayName, isSmallScreen, isTablet),
+                                        SizedBox(height: isSmallScreen ? 16 : 24),
+                                        _buildJoinCard(isSmallScreen, isTablet),
+                                      ],
+                                    ),
+                                  ),
+                                  
+                                  // Bottom spacing
+                                  SizedBox(height: isSmallScreen ? 4 : 8),
+                                ],
+                              ),
                             ),
                           ),
-                        ],
+                        ),
                       ),
+                    );
+                  },
+                ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(String displayName, bool isSmallScreen, bool isTablet) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Avatar
+          Container(
+            width: isSmallScreen ? 60 : 70,
+            height: isSmallScreen ? 60 : 70,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 20,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: _profilePhotoUrl != null
+                ? ClipOval(
+                    child: Image.network(
+                      _profilePhotoUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Icon(
+                          Icons.person,
+                          size: isSmallScreen ? 30 : 35,
+                          color: textSecondary,
+                        );
+                      },
+                    ),
+                  )
+                : Icon(
+                    Icons.person,
+                    size: isSmallScreen ? 30 : 35,
+                    color: textSecondary,
+                  ),
+          ),
+          
+          SizedBox(height: isSmallScreen ? 12 : 16),
+
+          // Welcome text
+          RichText(
+            text: TextSpan(
+              children: [
+                TextSpan(
+                  text: 'Welcome Back,\n',
+                  style: TextStyle(
+                    fontSize: isSmallScreen ? 24 : (isTablet ? 36 : 28),
+                    fontWeight: FontWeight.w600,
+                    color: textPrimary,
+                    height: 1.2,
+                  ),
+                ),
+                TextSpan(
+                  text: displayName,
+                  style: TextStyle(
+                    fontSize: isSmallScreen ? 24 : (isTablet ? 36 : 28),
+                    fontWeight: FontWeight.w600,
+                    color: textPrimary,
+                    height: 1.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          SizedBox(height: isSmallScreen ? 6 : 10),
+          
+          Text(
+            'Join an organization to continue your\nattendance management journey.',
+            style: TextStyle(
+              fontSize: isSmallScreen ? 12 : 14,
+              color: textSecondary,
+              height: 1.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildJoinCard(bool isSmallScreen, bool isTablet) {
+    return Container(
+      padding: EdgeInsets.all(isSmallScreen ? 20 : (isTablet ? 32 : 24)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 30,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Icon
+          Container(
+            width: isSmallScreen ? 48 : 56,
+            height: isSmallScreen ? 48 : 56,
+            decoration: BoxDecoration(
+              color: accentColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(
+              Icons.business,
+              color: accentColor,
+              size: isSmallScreen ? 24 : 28,
+            ),
+          ),
+          
+          SizedBox(height: isSmallScreen ? 12 : 16),
+
+          Text(
+            'Organization Code',
+            style: TextStyle(
+              fontSize: isSmallScreen ? 18 : (isTablet ? 22 : 20),
+              fontWeight: FontWeight.bold,
+              color: textPrimary,
+            ),
+          ),
+          
+          SizedBox(height: isSmallScreen ? 4 : 6),
+          
+          Text(
+            'Enter the invitation code provided by your HR or admin',
+            style: TextStyle(
+              fontSize: isSmallScreen ? 12 : 13,
+              color: textSecondary,
+              height: 1.5,
+            ),
+          ),
+          
+          SizedBox(height: isSmallScreen ? 16 : 20),
+
+          // Invitation code input
+          TextField(
+            controller: _invCodeController,
+            enabled: !_isJoining,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: isSmallScreen ? 16 : 18,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 3,
+              color: textPrimary,
+            ),
+            decoration: InputDecoration(
+              hintText: 'ENTER-CODE',
+              hintStyle: TextStyle(
+                color: Colors.grey.shade400,
+                letterSpacing: 3,
+                fontWeight: FontWeight.w600,
+              ),
+              filled: true,
+              fillColor: inputFillColor,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: accentColor, width: 2),
+              ),
+              disabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: isSmallScreen ? 14 : 16,
+              ),
+            ),
+            textCapitalization: TextCapitalization.characters,
+            onSubmitted: _isJoining ? null : (value) => _joinOrganizationWithCode(),
+          ),
+
+          SizedBox(height: isSmallScreen ? 12 : 14),
+
+          // Info box
+          Container(
+            padding: EdgeInsets.all(isSmallScreen ? 10 : 12),
+            decoration: BoxDecoration(
+              color: accentColor.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: accentColor.withOpacity(0.2),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.info_outline,
+                  color: accentColor,
+                  size: isSmallScreen ? 18 : 20,
+                ),
+                SizedBox(width: isSmallScreen ? 8 : 10),
+                Expanded(
+                  child: Text(
+                    'Ask your HR or organization admin for the invitation code',
+                    style: TextStyle(
+                      color: textPrimary,
+                      fontSize: isSmallScreen ? 11 : 12,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
+              ],
+            ),
+          ),
+
+          SizedBox(height: isSmallScreen ? 16 : 20),
+
+          // Join button
+          SizedBox(
+            width: double.infinity,
+            height: isSmallScreen ? 48 : 52,
+            child: ElevatedButton(
+              onPressed: _isJoining ? null : _joinOrganizationWithCode,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primaryColor,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.grey.shade400,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(isSmallScreen ? 24 : 26),
+                ),
+                elevation: 0,
               ),
+              child: _isJoining
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.login, size: isSmallScreen ? 18 : 20),
+                        SizedBox(width: isSmallScreen ? 8 : 10),
+                        Text(
+                          'Join Organization',
+                          style: TextStyle(
+                            fontSize: isSmallScreen ? 14 : 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+          ),
+        ],
       ),
     );
   }
