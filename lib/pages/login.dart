@@ -261,6 +261,7 @@ class _ModernLoginScreenState extends State<ModernLoginScreen> {
         '210380129521-9qcqse1mqa96aqo6liereotg82bquv8d.apps.googleusercontent.com',
         '210380129521-lto171n9tpf699ihsga5skrjm908j0si.apps.googleusercontent.com',
         '210380129521-tt2solatsiu1ieo6547kmgu6pfl19t7a.apps.googleusercontent.com',
+        '210380129521-lr442btemji6k32tnh4a29llllapc8q9.apps.googleusercontent.com',
       ];
 
       String activeAndroidClientId = androidClientIds.first;
