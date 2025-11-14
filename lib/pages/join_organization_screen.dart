@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'login.dart';
+import 'package:absensimassal/helpers/language_helper.dart';
 // import 'main_dashboard.dart'; // TODO: Uncomment setelah buat file dashboard
 
 class JoinOrganizationScreen extends StatefulWidget {
@@ -26,10 +28,12 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
   
   String? _displayName;
   String? _profilePhotoUrl;
+  String _currentLanguage = LanguageHelper.indonesian;
 
   @override
   void initState() {
     super.initState();
+    _loadLanguage();
     _initializeScreen();
   }
 
@@ -37,6 +41,17 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
   void dispose() {
     _invCodeController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadLanguage() async {
+    final lang = await LanguageHelper.getSavedLanguage();
+    if (mounted) {
+      setState(() => _currentLanguage = lang);
+    }
+  }
+
+  String _tr(String key) {
+    return LanguageHelper.translate(key, _currentLanguage);
   }
 
   Future<void> _initializeScreen() async {
@@ -89,7 +104,7 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
         
         debugPrint('✓ User already has organization: $orgName');
         
-        _showSnackBar('Anda sudah tergabung di $orgName', true);
+        _showSnackBar(_tr('join_org_already_member').replaceAll('{org}', orgName), true);
 
         await Future.delayed(const Duration(milliseconds: 800));
 
@@ -107,7 +122,7 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
         }
       }
     } catch (e) {
-      debugPrint('❌ Error initializing screen: $e');
+      debugPrint('Error initializing screen: $e');
       if (mounted) {
         setState(() => _isInitializing = false);
       }
@@ -115,10 +130,10 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
   }
 
   Future<void> _joinOrganizationWithCode() async {
-    final invCode = _invCodeController.text.trim();
+    final invCode = _invCodeController.text.trim().toUpperCase();
 
     if (invCode.isEmpty) {
-      _showSnackBar('Silakan masukkan kode undangan', false);
+      _showSnackBar(_tr('join_org_enter_code'), false);
       return;
     }
 
@@ -145,7 +160,7 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
         final orgName = existingOrgMember['organizations']?['name'] ?? 'an organization';
 
         if (mounted) {
-          _showSnackBar('Anda sudah tergabung di $orgName', true);
+          _showSnackBar(_tr('join_org_already_member').replaceAll('{org}', orgName), true);
 
           await Future.delayed(const Duration(milliseconds: 500));
 
@@ -221,19 +236,19 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
         _showSuccessDialog(orgName);
       }
     } catch (e) {
-      debugPrint('❌ Error joining organization: $e');
+      debugPrint('Error joining organization: $e');
       if (mounted) {
-        String errorMessage = 'Gagal bergabung dengan organisasi';
+        String errorMessage = _tr('join_org_error');
 
         if (e.toString().contains('tidak valid') || 
             e.toString().contains('not valid')) {
-          errorMessage = 'Kode undangan tidak valid';
+          errorMessage = _tr('join_org_invalid_code');
         } else if (e.toString().contains('sudah tergabung') ||
                    e.toString().contains('already')) {
-          errorMessage = 'Anda sudah tergabung di organisasi ini';
+          errorMessage = _tr('join_org_already_joined');
         } else if (e.toString().contains('terautentikasi') ||
                    e.toString().contains('authenticated')) {
-          errorMessage = 'User tidak terautentikasi';
+          errorMessage = _tr('join_org_not_authenticated');
         }
 
         _showSnackBar(errorMessage, false);
@@ -284,9 +299,9 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                   ),
                 ),
                 const SizedBox(height: 24),
-                const Text(
-                  'Berhasil Bergabung! 🎉',
-                  style: TextStyle(
+                Text(
+                  _tr('join_org_success_title'),
+                  style: const TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
                     color: textPrimary,
@@ -295,7 +310,7 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'Anda telah bergabung dengan\n$orgName',
+                  _tr('join_org_success_message').replaceAll('{org}', orgName),
                   style: const TextStyle(
                     fontSize: 15,
                     color: textSecondary,
@@ -311,7 +326,7 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                     onPressed: () {
                       Navigator.of(context).pop();
                       // TODO: Navigate to dashboard
-                      _showSnackBar('MainDashboard belum dibuat', true);
+                      _showSnackBar(_tr('join_org_dashboard_todo'), true);
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: primaryColor,
@@ -321,9 +336,9 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                       ),
                       elevation: 0,
                     ),
-                    child: const Text(
-                      'Lanjutkan',
-                      style: TextStyle(
+                    child: Text(
+                      _tr('join_org_continue'),
+                      style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
                       ),
@@ -364,18 +379,18 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                 ),
               ),
               const SizedBox(height: 20),
-              const Text(
-                'Konfirmasi Logout',
-                style: TextStyle(
+              Text(
+                _tr('join_org_logout_title'),
+                style: const TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
                   color: textPrimary,
                 ),
               ),
               const SizedBox(height: 12),
-              const Text(
-                'Apakah Anda yakin ingin keluar?',
-                style: TextStyle(
+              Text(
+                _tr('join_org_logout_message'),
+                style: const TextStyle(
                   fontSize: 14,
                   color: textSecondary,
                 ),
@@ -394,9 +409,9 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                         ),
                         side: BorderSide(color: Colors.grey.shade300),
                       ),
-                      child: const Text(
-                        'Batal',
-                        style: TextStyle(
+                      child: Text(
+                        _tr('join_org_cancel'),
+                        style: const TextStyle(
                           color: textSecondary,
                           fontWeight: FontWeight.w600,
                         ),
@@ -415,9 +430,9 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                         ),
                         elevation: 0,
                       ),
-                      child: const Text(
-                        'Logout',
-                        style: TextStyle(
+                      child: Text(
+                        _tr('join_org_logout'),
+                        style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.w600,
                         ),
@@ -445,7 +460,7 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
       } catch (e) {
         debugPrint('Error logging out: $e');
         if (mounted) {
-          _showSnackBar('Gagal logout', false);
+          _showSnackBar(_tr('join_org_logout_failed'), false);
         }
       }
     }
@@ -471,9 +486,17 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
     final screenHeight = MediaQuery.of(context).size.height;
     final screenWidth = MediaQuery.of(context).size.width;
     
-    // Responsive sizing
-    final isSmallScreen = screenHeight < 700;
+    // Responsive sizing dengan breakpoint yang lebih detail
+    final isVerySmallScreen = screenHeight < 600;
+    final isSmallScreen = screenHeight < 700 && screenHeight >= 600;
+    final isMediumScreen = screenHeight >= 700 && screenHeight < 900;
     final isTablet = screenWidth > 600;
+    final isLargeTablet = screenWidth > 800;
+    
+    // Dynamic padding dan sizing
+    final horizontalPadding = isLargeTablet ? 48.0 : (isTablet ? 40.0 : 24.0);
+    final verticalPadding = isVerySmallScreen ? 8.0 : (isSmallScreen ? 12.0 : 16.0);
+    final maxCardWidth = isLargeTablet ? 550.0 : (isTablet ? 500.0 : double.infinity);
     
     return Scaffold(
       body: Container(
@@ -508,11 +531,11 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                           child: Center(
                             child: Container(
                               constraints: BoxConstraints(
-                                maxWidth: isTablet ? 500 : double.infinity,
+                                maxWidth: maxCardWidth,
                               ),
                               padding: EdgeInsets.symmetric(
-                                horizontal: isTablet ? 40 : 24,
-                                vertical: isSmallScreen ? 12 : 16,
+                                horizontal: horizontalPadding,
+                                vertical: verticalPadding,
                               ),
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -520,51 +543,7 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                                   // Top section: Logout button
                                   Align(
                                     alignment: Alignment.topRight,
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(12),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black.withOpacity(0.1),
-                                            blurRadius: 10,
-                                            offset: const Offset(0, 2),
-                                          ),
-                                        ],
-                                      ),
-                                      child: Material(
-                                        color: Colors.transparent,
-                                        child: InkWell(
-                                          onTap: _isJoining ? null : _handleLogout,
-                                          borderRadius: BorderRadius.circular(12),
-                                          child: Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 16,
-                                              vertical: 10,
-                                            ),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Icon(
-                                                  Icons.logout_rounded,
-                                                  color: _isJoining ? Colors.grey : Colors.red,
-                                                  size: 18,
-                                                ),
-                                                const SizedBox(width: 6),
-                                                Text(
-                                                  'Logout',
-                                                  style: TextStyle(
-                                                    color: _isJoining ? Colors.grey : Colors.red,
-                                                    fontSize: 14,
-                                                    fontWeight: FontWeight.w600,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
+                                    child: _buildLogoutButton(isVerySmallScreen, isSmallScreen),
                                   ),
                                   
                                   // Middle section: Header + Card
@@ -572,15 +551,28 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                                     child: Column(
                                       mainAxisAlignment: MainAxisAlignment.center,
                                       children: [
-                                        _buildHeader(displayName, isSmallScreen, isTablet),
-                                        SizedBox(height: isSmallScreen ? 16 : 24),
-                                        _buildJoinCard(isSmallScreen, isTablet),
+                                        _buildHeader(
+                                          displayName, 
+                                          isVerySmallScreen, 
+                                          isSmallScreen, 
+                                          isTablet,
+                                          isLargeTablet,
+                                        ),
+                                        SizedBox(
+                                          height: isVerySmallScreen ? 12 : (isSmallScreen ? 16 : 24),
+                                        ),
+                                        _buildJoinCard(
+                                          isVerySmallScreen, 
+                                          isSmallScreen, 
+                                          isTablet,
+                                          isLargeTablet,
+                                        ),
                                       ],
                                     ),
                                   ),
                                   
                                   // Bottom spacing
-                                  SizedBox(height: isSmallScreen ? 4 : 8),
+                                  SizedBox(height: isVerySmallScreen ? 4 : 8),
                                 ],
                               ),
                             ),
@@ -595,17 +587,84 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
     );
   }
 
-  Widget _buildHeader(String displayName, bool isSmallScreen, bool isTablet) {
+  Widget _buildLogoutButton(bool isVerySmallScreen, bool isSmallScreen) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _isJoining ? null : _handleLogout,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: isVerySmallScreen ? 12 : 16,
+              vertical: isVerySmallScreen ? 8 : 10,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.logout_rounded,
+                  color: _isJoining ? Colors.grey : Colors.red,
+                  size: isVerySmallScreen ? 16 : 18,
+                ),
+                SizedBox(width: isVerySmallScreen ? 4 : 6),
+                Text(
+                  _tr('join_org_logout'),
+                  style: TextStyle(
+                    color: _isJoining ? Colors.grey : Colors.red,
+                    fontSize: isVerySmallScreen ? 13 : 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(
+    String displayName, 
+    bool isVerySmallScreen, 
+    bool isSmallScreen, 
+    bool isTablet,
+    bool isLargeTablet,
+  ) {
+    final welcomeFontSize = isVerySmallScreen 
+        ? 20.0 
+        : (isSmallScreen ? 24.0 : (isLargeTablet ? 40.0 : (isTablet ? 36.0 : 28.0)));
+    
+    final avatarSize = isVerySmallScreen 
+        ? 55.0 
+        : (isSmallScreen ? 60.0 : (isTablet ? 80.0 : 70.0));
+    
+    final iconSize = isVerySmallScreen 
+        ? 28.0 
+        : (isSmallScreen ? 30.0 : (isTablet ? 40.0 : 35.0));
+    
+    final spacingAfterAvatar = isVerySmallScreen ? 10.0 : (isSmallScreen ? 12.0 : 16.0);
+
     return Align(
       alignment: Alignment.centerLeft,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Avatar
           Container(
-            width: isSmallScreen ? 60 : 70,
-            height: isSmallScreen ? 60 : 70,
+            width: avatarSize,
+            height: avatarSize,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: Colors.white,
@@ -625,7 +684,7 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                       errorBuilder: (context, error, stackTrace) {
                         return Icon(
                           Icons.person,
-                          size: isSmallScreen ? 30 : 35,
+                          size: iconSize,
                           color: textSecondary,
                         );
                       },
@@ -633,21 +692,20 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                   )
                 : Icon(
                     Icons.person,
-                    size: isSmallScreen ? 30 : 35,
+                    size: iconSize,
                     color: textSecondary,
                   ),
           ),
           
-          SizedBox(height: isSmallScreen ? 12 : 16),
+          SizedBox(height: spacingAfterAvatar),
 
-          // Welcome text
           RichText(
             text: TextSpan(
               children: [
                 TextSpan(
-                  text: 'Welcome Back,\n',
+                  text: '${_tr('join_org_welcome')},\n',
                   style: TextStyle(
-                    fontSize: isSmallScreen ? 24 : (isTablet ? 36 : 28),
+                    fontSize: welcomeFontSize,
                     fontWeight: FontWeight.w600,
                     color: textPrimary,
                     height: 1.2,
@@ -656,7 +714,7 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                 TextSpan(
                   text: displayName,
                   style: TextStyle(
-                    fontSize: isSmallScreen ? 24 : (isTablet ? 36 : 28),
+                    fontSize: welcomeFontSize,
                     fontWeight: FontWeight.w600,
                     color: textPrimary,
                     height: 1.2,
@@ -665,25 +723,40 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
               ],
             ),
           ),
-          
-          SizedBox(height: isSmallScreen ? 6 : 10),
-          
-          Text(
-            'Join an organization to continue your\nattendance management journey.',
-            style: TextStyle(
-              fontSize: isSmallScreen ? 12 : 14,
-              color: textSecondary,
-              height: 1.5,
-            ),
-          ),
         ],
       ),
     );
   }
 
-  Widget _buildJoinCard(bool isSmallScreen, bool isTablet) {
+  Widget _buildJoinCard(
+    bool isVerySmallScreen, 
+    bool isSmallScreen, 
+    bool isTablet,
+    bool isLargeTablet,
+  ) {
+    final cardPadding = isVerySmallScreen 
+        ? 16.0 
+        : (isSmallScreen ? 20.0 : (isLargeTablet ? 36.0 : (isTablet ? 32.0 : 24.0)));
+    
+    final iconSize = isVerySmallScreen ? 44.0 : (isSmallScreen ? 48.0 : 56.0);
+    final iconInnerSize = isVerySmallScreen ? 22.0 : (isSmallScreen ? 24.0 : 28.0);
+    
+    final titleFontSize = isVerySmallScreen 
+        ? 16.0 
+        : (isSmallScreen ? 18.0 : (isLargeTablet ? 24.0 : (isTablet ? 22.0 : 20.0)));
+    
+    final subtitleFontSize = isVerySmallScreen 
+        ? 11.0 
+        : (isSmallScreen ? 12.0 : 13.0);
+    
+    final inputFontSize = isVerySmallScreen 
+        ? 14.0 
+        : (isSmallScreen ? 16.0 : 18.0);
+    
+    final buttonHeight = isVerySmallScreen ? 44.0 : (isSmallScreen ? 48.0 : 52.0);
+
     return Container(
-      padding: EdgeInsets.all(isSmallScreen ? 20 : (isTablet ? 32 : 24)),
+      padding: EdgeInsets.all(cardPadding),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
@@ -699,58 +772,58 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Icon
-          Container(
-            width: isSmallScreen ? 48 : 56,
-            height: isSmallScreen ? 48 : 56,
-            decoration: BoxDecoration(
-              color: accentColor.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Icon(
-              Icons.business,
-              color: accentColor,
-              size: isSmallScreen ? 24 : 28,
-            ),
+          Row(
+            children: [
+              Container(
+                width: iconSize,
+                height: iconSize,
+                decoration: BoxDecoration(
+                  color: accentColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(
+                  Icons.business,
+                  color: accentColor,
+                  size: iconInnerSize,
+                ),
+              ),
+              SizedBox(width: isVerySmallScreen ? 8 : 10),
+              Text(
+                _tr('join_org_title'),
+                style: TextStyle(
+                  fontSize: titleFontSize,
+                  fontWeight: FontWeight.bold,
+                  color: textPrimary,
+                ),
+              ),
+            ],
           ),
           
-          SizedBox(height: isSmallScreen ? 12 : 16),
-
-          Text(
-            'Organization Code',
-            style: TextStyle(
-              fontSize: isSmallScreen ? 18 : (isTablet ? 22 : 20),
-              fontWeight: FontWeight.bold,
-              color: textPrimary,
-            ),
-          ),
-          
-          SizedBox(height: isSmallScreen ? 4 : 6),
+          SizedBox(height: isVerySmallScreen ? 4 : 6),
           
           Text(
-            'Enter the invitation code provided by your HR or admin',
+            _tr('join_org_subtitle'),
             style: TextStyle(
-              fontSize: isSmallScreen ? 12 : 13,
+              fontSize: subtitleFontSize,
               color: textSecondary,
               height: 1.5,
             ),
           ),
           
-          SizedBox(height: isSmallScreen ? 16 : 20),
+          SizedBox(height: isVerySmallScreen ? 14 : (isSmallScreen ? 16 : 20)),
 
-          // Invitation code input
           TextField(
             controller: _invCodeController,
             enabled: !_isJoining,
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: isSmallScreen ? 16 : 18,
+              fontSize: inputFontSize,
               fontWeight: FontWeight.w700,
               letterSpacing: 3,
               color: textPrimary,
             ),
             decoration: InputDecoration(
-              hintText: 'ENTER-CODE',
+              hintText: _tr('join_org_input_hint'),
               hintStyle: TextStyle(
                 color: Colors.grey.shade400,
                 letterSpacing: 3,
@@ -776,18 +849,20 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
               ),
               contentPadding: EdgeInsets.symmetric(
                 horizontal: 16,
-                vertical: isSmallScreen ? 14 : 16,
+                vertical: isVerySmallScreen ? 12 : (isSmallScreen ? 14 : 16),
               ),
             ),
             textCapitalization: TextCapitalization.characters,
+            inputFormatters: [
+              UpperCaseTextFormatter(),
+            ],
             onSubmitted: _isJoining ? null : (value) => _joinOrganizationWithCode(),
           ),
 
-          SizedBox(height: isSmallScreen ? 12 : 14),
+          SizedBox(height: isVerySmallScreen ? 10 : (isSmallScreen ? 12 : 14)),
 
-          // Info box
           Container(
-            padding: EdgeInsets.all(isSmallScreen ? 10 : 12),
+            padding: EdgeInsets.all(isVerySmallScreen ? 8 : (isSmallScreen ? 10 : 12)),
             decoration: BoxDecoration(
               color: accentColor.withOpacity(0.08),
               borderRadius: BorderRadius.circular(12),
@@ -801,15 +876,15 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                 Icon(
                   Icons.info_outline,
                   color: accentColor,
-                  size: isSmallScreen ? 18 : 20,
+                  size: isVerySmallScreen ? 16 : (isSmallScreen ? 18 : 20),
                 ),
-                SizedBox(width: isSmallScreen ? 8 : 10),
+                SizedBox(width: isVerySmallScreen ? 6 : (isSmallScreen ? 8 : 10)),
                 Expanded(
                   child: Text(
-                    'Ask your HR or organization admin for the invitation code',
+                    _tr('join_org_info'),
                     style: TextStyle(
                       color: textPrimary,
-                      fontSize: isSmallScreen ? 11 : 12,
+                      fontSize: isVerySmallScreen ? 10 : (isSmallScreen ? 11 : 12),
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -818,12 +893,11 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
             ),
           ),
 
-          SizedBox(height: isSmallScreen ? 16 : 20),
+          SizedBox(height: isVerySmallScreen ? 14 : (isSmallScreen ? 16 : 20)),
 
-          // Join button
           SizedBox(
             width: double.infinity,
-            height: isSmallScreen ? 48 : 52,
+            height: buttonHeight,
             child: ElevatedButton(
               onPressed: _isJoining ? null : _joinOrganizationWithCode,
               style: ElevatedButton.styleFrom(
@@ -831,29 +905,37 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                 foregroundColor: Colors.white,
                 disabledBackgroundColor: Colors.grey.shade400,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(isSmallScreen ? 24 : 26),
+                  borderRadius: BorderRadius.circular(isVerySmallScreen ? 22 : (isSmallScreen ? 24 : 26)),
                 ),
                 elevation: 0,
               ),
               child: _isJoining
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
+                  ? SizedBox(
+                      width: isVerySmallScreen ? 20 : 24,
+                      height: isVerySmallScreen ? 20 : 24,
+                      child: const CircularProgressIndicator(
                         strokeWidth: 2,
                         valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                       ),
                     )
                   : Row(
                       mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.login, size: isSmallScreen ? 18 : 20),
-                        SizedBox(width: isSmallScreen ? 8 : 10),
-                        Text(
-                          'Join Organization',
-                          style: TextStyle(
-                            fontSize: isSmallScreen ? 14 : 16,
-                            fontWeight: FontWeight.w600,
+                        Icon(
+                          Icons.login, 
+                          size: isVerySmallScreen ? 16 : (isSmallScreen ? 18 : 20),
+                        ),
+                        SizedBox(width: isVerySmallScreen ? 6 : (isSmallScreen ? 8 : 10)),
+                        Flexible(
+                          child: Text(
+                            isVerySmallScreen ? _tr('join_org_button_short') : _tr('join_org_button'),
+                            style: TextStyle(
+                              fontSize: isVerySmallScreen ? 13 : (isSmallScreen ? 14 : 16),
+                              fontWeight: FontWeight.w600,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
                           ),
                         ),
                       ],
@@ -862,6 +944,20 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+// Custom TextInputFormatter untuk memastikan semua input UPPERCASE
+class UpperCaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    return TextEditingValue(
+      text: newValue.text.toUpperCase(),
+      selection: newValue.selection,
     );
   }
 }
