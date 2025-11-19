@@ -28,6 +28,11 @@ class AttendanceService {
       Map<String, dynamic> recordData;
 
       if (existingRecord != null) {
+        // ✅ Jika sudah check-in, jangan update lagi
+        if (existingRecord['actual_check_in'] != null) {
+          throw Exception('Already checked in today at ${existingRecord['actual_check_in']}');
+        }
+        
         // Update existing record
         recordData = {
           'actual_check_in': now.toIso8601String(),
@@ -108,6 +113,11 @@ class AttendanceService {
 
       if (existingRecord['actual_check_in'] == null) {
         throw Exception('Please check in first');
+      }
+
+      // ✅ Jika sudah check-out, jangan update lagi
+      if (existingRecord['actual_check_out'] != null) {
+        throw Exception('Already checked out today at ${existingRecord['actual_check_out']}');
       }
 
       // Calculate work duration
@@ -222,8 +232,8 @@ class AttendanceService {
         'event_time': DateTime.now().toIso8601String(),
         'method': method,
         'location': location,
-        'is_verified': method == 'face_recognition',
-        'verification_method': method == 'face_recognition' ? 'face_recognition' : null,
+        'is_verified': method == 'face_recognition' || method == 'face_recognition_kiosk',
+        'verification_method': method.contains('face_recognition') ? 'face_recognition' : null,
       };
 
       await _supabase.from('attendance_logs').insert(logData);

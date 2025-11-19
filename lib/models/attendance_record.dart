@@ -1,8 +1,8 @@
 // lib/models/attendance_record.dart
 class AttendanceRecord {
-  final int? id;
+  final int id;
   final int organizationMemberId;
-  final DateTime attendanceDate;
+  final String attendanceDate;
   final int? scheduledShiftId;
   final String? scheduledStart;
   final String? scheduledEnd;
@@ -22,12 +22,17 @@ class AttendanceRecord {
   final int? lateMinutes;
   final int? earlyLeaveMinutes;
   final String? status;
-  final String validationStatus;
-  final DateTime? createdAt;
-  final DateTime? updatedAt;
+  final String? validationStatus;
+  final String? validatedBy;
+  final DateTime? validatedAt;
+  final String? validationNote;
+  final int? applicationId;
+  final Map<String, dynamic>? rawData;
+  final DateTime createdAt;
+  final DateTime updatedAt;
 
   AttendanceRecord({
-    this.id,
+    required this.id,
     required this.organizationMemberId,
     required this.attendanceDate,
     this.scheduledShiftId,
@@ -49,46 +54,54 @@ class AttendanceRecord {
     this.lateMinutes,
     this.earlyLeaveMinutes,
     this.status,
-    this.validationStatus = 'pending',
-    this.createdAt,
-    this.updatedAt,
+    this.validationStatus,
+    this.validatedBy,
+    this.validatedAt,
+    this.validationNote,
+    this.applicationId,
+    this.rawData,
+    required this.createdAt,
+    required this.updatedAt,
   });
 
   factory AttendanceRecord.fromJson(Map<String, dynamic> json) {
     return AttendanceRecord(
-      id: json['id'],
-      organizationMemberId: json['organization_member_id'],
-      attendanceDate: DateTime.parse(json['attendance_date']),
-      scheduledShiftId: json['scheduled_shift_id'],
-      scheduledStart: json['scheduled_start'],
-      scheduledEnd: json['scheduled_end'],
+      id: json['id'] as int,
+      organizationMemberId: json['organization_member_id'] as int,
+      attendanceDate: json['attendance_date'] as String,
+      scheduledShiftId: json['scheduled_shift_id'] as int?,
+      scheduledStart: json['scheduled_start'] as String?,
+      scheduledEnd: json['scheduled_end'] as String?,
       actualCheckIn: json['actual_check_in'] != null
           ? DateTime.parse(json['actual_check_in'])
           : null,
       actualCheckOut: json['actual_check_out'] != null
           ? DateTime.parse(json['actual_check_out'])
           : null,
-      checkInDeviceId: json['check_in_device_id'],
-      checkOutDeviceId: json['check_out_device_id'],
-      checkInMethod: json['check_in_method'],
-      checkOutMethod: json['check_out_method'],
-      checkInLocation: json['check_in_location'],
-      checkOutLocation: json['check_out_location'],
-      checkInPhotoUrl: json['check_in_photo_url'],
-      checkOutPhotoUrl: json['check_out_photo_url'],
-      workDurationMinutes: json['work_duration_minutes'],
-      breakDurationMinutes: json['break_duration_minutes'],
-      overtimeMinutes: json['overtime_minutes'],
-      lateMinutes: json['late_minutes'],
-      earlyLeaveMinutes: json['early_leave_minutes'],
-      status: json['status'],
-      validationStatus: json['validation_status'] ?? 'pending',
-      createdAt: json['created_at'] != null
-          ? DateTime.parse(json['created_at'])
+      checkInDeviceId: json['check_in_device_id'] as int?,
+      checkOutDeviceId: json['check_out_device_id'] as int?,
+      checkInMethod: json['check_in_method'] as String?,
+      checkOutMethod: json['check_out_method'] as String?,
+      checkInLocation: json['check_in_location'] as Map<String, dynamic>?,
+      checkOutLocation: json['check_out_location'] as Map<String, dynamic>?,
+      checkInPhotoUrl: json['check_in_photo_url'] as String?,
+      checkOutPhotoUrl: json['check_out_photo_url'] as String?,
+      workDurationMinutes: json['work_duration_minutes'] as int?,
+      breakDurationMinutes: json['break_duration_minutes'] as int?,
+      overtimeMinutes: json['overtime_minutes'] as int?,
+      lateMinutes: json['late_minutes'] as int?,
+      earlyLeaveMinutes: json['early_leave_minutes'] as int?,
+      status: json['status'] as String?,
+      validationStatus: json['validation_status'] as String?,
+      validatedBy: json['validated_by'] as String?,
+      validatedAt: json['validated_at'] != null
+          ? DateTime.parse(json['validated_at'])
           : null,
-      updatedAt: json['updated_at'] != null
-          ? DateTime.parse(json['updated_at'])
-          : null,
+      validationNote: json['validation_note'] as String?,
+      applicationId: json['application_id'] as int?,
+      rawData: json['raw_data'] as Map<String, dynamic>?,
+      createdAt: DateTime.parse(json['created_at']),
+      updatedAt: DateTime.parse(json['updated_at']),
     );
   }
 
@@ -96,7 +109,7 @@ class AttendanceRecord {
     return {
       'id': id,
       'organization_member_id': organizationMemberId,
-      'attendance_date': attendanceDate.toIso8601String().split('T')[0],
+      'attendance_date': attendanceDate,
       'scheduled_shift_id': scheduledShiftId,
       'scheduled_start': scheduledStart,
       'scheduled_end': scheduledEnd,
@@ -117,6 +130,89 @@ class AttendanceRecord {
       'early_leave_minutes': earlyLeaveMinutes,
       'status': status,
       'validation_status': validationStatus,
+      'validated_by': validatedBy,
+      'validated_at': validatedAt?.toIso8601String(),
+      'validation_note': validationNote,
+      'application_id': applicationId,
+      'raw_data': rawData,
+      'created_at': createdAt.toIso8601String(),
+      'updated_at': updatedAt.toIso8601String(),
     };
+  }
+
+  // Helper methods
+  bool get hasCheckedIn => actualCheckIn != null;
+  bool get hasCheckedOut => actualCheckOut != null;
+  bool get isComplete => hasCheckedIn && hasCheckedOut;
+  
+  String get statusDisplay {
+    if (status == null) return 'Unknown';
+    return status!.replaceAll('_', ' ').toUpperCase();
+  }
+
+  AttendanceRecord copyWith({
+    int? id,
+    int? organizationMemberId,
+    String? attendanceDate,
+    int? scheduledShiftId,
+    String? scheduledStart,
+    String? scheduledEnd,
+    DateTime? actualCheckIn,
+    DateTime? actualCheckOut,
+    int? checkInDeviceId,
+    int? checkOutDeviceId,
+    String? checkInMethod,
+    String? checkOutMethod,
+    Map<String, dynamic>? checkInLocation,
+    Map<String, dynamic>? checkOutLocation,
+    String? checkInPhotoUrl,
+    String? checkOutPhotoUrl,
+    int? workDurationMinutes,
+    int? breakDurationMinutes,
+    int? overtimeMinutes,
+    int? lateMinutes,
+    int? earlyLeaveMinutes,
+    String? status,
+    String? validationStatus,
+    String? validatedBy,
+    DateTime? validatedAt,
+    String? validationNote,
+    int? applicationId,
+    Map<String, dynamic>? rawData,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) {
+    return AttendanceRecord(
+      id: id ?? this.id,
+      organizationMemberId: organizationMemberId ?? this.organizationMemberId,
+      attendanceDate: attendanceDate ?? this.attendanceDate,
+      scheduledShiftId: scheduledShiftId ?? this.scheduledShiftId,
+      scheduledStart: scheduledStart ?? this.scheduledStart,
+      scheduledEnd: scheduledEnd ?? this.scheduledEnd,
+      actualCheckIn: actualCheckIn ?? this.actualCheckIn,
+      actualCheckOut: actualCheckOut ?? this.actualCheckOut,
+      checkInDeviceId: checkInDeviceId ?? this.checkInDeviceId,
+      checkOutDeviceId: checkOutDeviceId ?? this.checkOutDeviceId,
+      checkInMethod: checkInMethod ?? this.checkInMethod,
+      checkOutMethod: checkOutMethod ?? this.checkOutMethod,
+      checkInLocation: checkInLocation ?? this.checkInLocation,
+      checkOutLocation: checkOutLocation ?? this.checkOutLocation,
+      checkInPhotoUrl: checkInPhotoUrl ?? this.checkInPhotoUrl,
+      checkOutPhotoUrl: checkOutPhotoUrl ?? this.checkOutPhotoUrl,
+      workDurationMinutes: workDurationMinutes ?? this.workDurationMinutes,
+      breakDurationMinutes: breakDurationMinutes ?? this.breakDurationMinutes,
+      overtimeMinutes: overtimeMinutes ?? this.overtimeMinutes,
+      lateMinutes: lateMinutes ?? this.lateMinutes,
+      earlyLeaveMinutes: earlyLeaveMinutes ?? this.earlyLeaveMinutes,
+      status: status ?? this.status,
+      validationStatus: validationStatus ?? this.validationStatus,
+      validatedBy: validatedBy ?? this.validatedBy,
+      validatedAt: validatedAt ?? this.validatedAt,
+      validationNote: validationNote ?? this.validationNote,
+      applicationId: applicationId ?? this.applicationId,
+      rawData: rawData ?? this.rawData,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
   }
 }

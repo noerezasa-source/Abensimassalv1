@@ -1,18 +1,23 @@
 // lib/services/face_recognition_service.dart
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:google_ml_kit/google_ml_kit.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:image/image.dart' as img;
 
 class FaceRecognitionService {
-  final FaceDetector _faceDetector = GoogleMlKit.vision.faceDetector(
-    FaceDetectorOptions(
-      enableContours: true,
-      enableLandmarks: true,
-      enableClassification: true,
-      enableTracking: true,
-    ),
-  );
+  late final FaceDetector _faceDetector;
+
+  FaceRecognitionService() {
+    _faceDetector = FaceDetector(
+      options: FaceDetectorOptions(
+        enableContours: true,
+        enableLandmarks: true,
+        enableClassification: true,
+        enableTracking: true,
+        performanceMode: FaceDetectorMode.accurate,
+      ),
+    );
+  }
 
   // Deteksi wajah dari file gambar
   Future<List<Face>> detectFaces(String imagePath) async {
@@ -33,67 +38,48 @@ class FaceRecognitionService {
       throw Exception('Multiple faces detected. Please use a single face photo');
     }
 
-    final face = faces.first;
-    
-    // Extract landmarks dan kontur wajah
+    return buildTemplateFromFace(faces.first);
+  }
+
+  Map<String, dynamic> buildTemplateFromFace(Face face) {
+    final boundingBox = face.boundingBox;
+    final width = boundingBox.width == 0 ? 1.0 : boundingBox.width;
+    final height = boundingBox.height == 0 ? 1.0 : boundingBox.height;
+
+    double normalizeX(num x) =>
+        ((x.toDouble() - boundingBox.left) / width).clamp(-0.5, 1.5).toDouble();
+    double normalizeY(num y) =>
+        ((y.toDouble() - boundingBox.top) / height).clamp(-0.5, 1.5).toDouble();
+
     final landmarks = <String, dynamic>{};
-    
-    // Left eye
-    final leftEye = face.landmarks[FaceLandmarkType.leftEye];
-    if (leftEye != null) {
-      landmarks['leftEye'] = {
-        'x': leftEye.position.x,
-        'y': leftEye.position.y,
+
+    void addLandmark(FaceLandmarkType type, String key) {
+      final landmark = face.landmarks[type];
+      if (landmark == null) return;
+      landmarks[key] = {
+        'x': normalizeX(landmark.position.x),
+        'y': normalizeY(landmark.position.y),
       };
     }
 
-    // Right eye
-    final rightEye = face.landmarks[FaceLandmarkType.rightEye];
-    if (rightEye != null) {
-      landmarks['rightEye'] = {
-        'x': rightEye.position.x,
-        'y': rightEye.position.y,
-      };
-    }
+    addLandmark(FaceLandmarkType.leftEye, 'leftEye');
+    addLandmark(FaceLandmarkType.rightEye, 'rightEye');
+    addLandmark(FaceLandmarkType.noseBase, 'noseBase');
+    addLandmark(FaceLandmarkType.leftMouth, 'leftMouth');
+    addLandmark(FaceLandmarkType.rightMouth, 'rightMouth');
 
-    // Nose
-    final noseBase = face.landmarks[FaceLandmarkType.noseBase];
-    if (noseBase != null) {
-      landmarks['noseBase'] = {
-        'x': noseBase.position.x,
-        'y': noseBase.position.y,
-      };
-    }
-
-    // Mouth
-    final leftMouth = face.landmarks[FaceLandmarkType.leftMouth];
-    final rightMouth = face.landmarks[FaceLandmarkType.rightMouth];
-    if (leftMouth != null && rightMouth != null) {
-      landmarks['leftMouth'] = {
-        'x': leftMouth.position.x,
-        'y': leftMouth.position.y,
-      };
-      landmarks['rightMouth'] = {
-        'x': rightMouth.position.x,
-        'y': rightMouth.position.y,
-      };
-    }
-
-    // Bounding box
-    final boundingBox = {
-      'left': face.boundingBox.left,
-      'top': face.boundingBox.top,
-      'width': face.boundingBox.width,
-      'height': face.boundingBox.height,
+    final boundingBoxData = {
+      'left': boundingBox.left,
+      'top': boundingBox.top,
+      'width': boundingBox.width,
+      'height': boundingBox.height,
     };
 
-    // Head rotation angles
     final headAngles = {
       'eulerY': face.headEulerAngleY ?? 0.0,
       'eulerZ': face.headEulerAngleZ ?? 0.0,
     };
 
-    // Face quality scores
     final qualityScores = {
       'smilingProbability': face.smilingProbability ?? 0.0,
       'leftEyeOpenProbability': face.leftEyeOpenProbability ?? 0.0,
@@ -101,8 +87,9 @@ class FaceRecognitionService {
     };
 
     return {
+      'version': 2,
       'landmarks': landmarks,
-      'boundingBox': boundingBox,
+      'boundingBox': boundingBoxData,
       'headAngles': headAngles,
       'qualityScores': qualityScores,
       'trackingId': face.trackingId,
@@ -118,8 +105,8 @@ class FaceRecognitionService {
     int comparisonCount = 0;
 
     // Bandingkan landmarks
-    final landmarks1 = template1['landmarks'] as Map<String, dynamic>;
-    final landmarks2 = template2['landmarks'] as Map<String, dynamic>;
+    final landmarks1 = _normalizeTemplateLandmarks(template1);
+    final landmarks2 = _normalizeTemplateLandmarks(template2);
 
     for (var key in landmarks1.keys) {
       if (landmarks2.containsKey(key)) {
@@ -214,5 +201,58 @@ class FaceRecognitionService {
 
   void dispose() {
     _faceDetector.close();
+  }
+
+  Map<String, Map<String, double>> _normalizeTemplateLandmarks(
+    Map<String, dynamic> template,
+  ) {
+    final landmarks =
+        Map<String, dynamic>.from(template['landmarks'] ?? const {});
+
+    if (landmarks.isEmpty) return {};
+
+    bool alreadyNormalized = true;
+    for (var entry in landmarks.entries) {
+      final point = entry.value;
+      if (point is! Map) continue;
+      final x = point['x'];
+      final y = point['y'];
+      if (x is num && y is num) {
+        if (x < -0.5 || x > 1.5 || y < -0.5 || y > 1.5) {
+          alreadyNormalized = false;
+          break;
+        }
+      }
+    }
+
+    if (alreadyNormalized) {
+      return landmarks.map((key, value) {
+        final point = value as Map<String, dynamic>;
+        return MapEntry(key, {
+          'x': (point['x'] as num?)?.toDouble() ?? 0.0,
+          'y': (point['y'] as num?)?.toDouble() ?? 0.0,
+        });
+      });
+    }
+
+    final boundingBox =
+        Map<String, dynamic>.from(template['boundingBox'] ?? const {});
+    final left = (boundingBox['left'] as num?)?.toDouble() ?? 0.0;
+    final top = (boundingBox['top'] as num?)?.toDouble() ?? 0.0;
+    final width = (boundingBox['width'] as num?)?.toDouble() ?? 1.0;
+    final height = (boundingBox['height'] as num?)?.toDouble() ?? 1.0;
+
+    return landmarks.map((key, value) {
+      final point = value as Map<String, dynamic>;
+      final rawX = (point['x'] as num?)?.toDouble() ?? 0.0;
+      final rawY = (point['y'] as num?)?.toDouble() ?? 0.0;
+      final normalizedX = width == 0 ? 0.0 : (rawX - left) / width;
+      final normalizedY = height == 0 ? 0.0 : (rawY - top) / height;
+
+      return MapEntry(key, {
+        'x': normalizedX.clamp(-0.5, 1.5),
+        'y': normalizedY.clamp(-0.5, 1.5),
+      });
+    });
   }
 }

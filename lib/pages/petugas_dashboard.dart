@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import '../services/attendance_service.dart';
-import '../services/biometric_service.dart';
 import '../services/role_service.dart';
 import '../models/attendance_record.dart';
-import 'face_registration_page.dart';
-import 'face_attendance_page.dart';
+import 'face_attendance_multi_user_page.dart';
 import 'petugas_profile_page.dart';
 
 class PetugasDashboardPage extends StatefulWidget {
@@ -25,97 +23,56 @@ class PetugasDashboardPage extends StatefulWidget {
 
 class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
   final AttendanceService _attendanceService = AttendanceService();
-  final BiometricService _biometricService = BiometricService();
   final RoleService _roleService = RoleService();
 
-  AttendanceRecord? _todayAttendance;
-  bool _hasRegisteredFace = false;
-  bool _isLoadingAttendance = true;
-  bool _isCheckingFace = true;
+  bool _isLoadingStats = true;
   String? _errorMessage;
   int _currentNavIndex = 0;
 
-  // Data dummy untuk attendance history (1 item saja)
-  final List<Map<String, dynamic>> attendanceHistory = [
-    {
-      'studentName': 'Angelica Martha Faozi',
-      'status': 'Arrived on time',
-      'date': 'Wednesday, 8 January 2025',
-      'time': '07:15',
-      'icon': Icons.check_circle,
-      'iconColor': Colors.green,
-      'photoUrl': 'https://i.pravatar.cc/150?img=47',
-    },
-  ];
+  // Stats data
+  int _checkedInCount = 0;
+  int _pendingCount = 0;
+  int _lateCount = 0;
+
+  // Recent activity data
+  final List<Map<String, dynamic>> attendanceHistory = [];
 
   @override
   void initState() {
     super.initState();
-    debugPrint('=== PETUGAS DASHBOARD INIT ===');
+    debugPrint('=== PETUGAS DASHBOARD INIT (KIOSK MODE) ===');
     debugPrint('Organization Member ID: ${widget.organizationMemberId}');
     debugPrint('Role: ${_roleService.getRoleName(widget.memberData)}');
-    _loadTodayAttendance();
-    _checkFaceRegistration();
+    _loadTodayStats();
   }
 
-  Future<void> _loadTodayAttendance() async {
+  Future<void> _loadTodayStats() async {
     setState(() {
-      _isLoadingAttendance = true;
+      _isLoadingStats = true;
       _errorMessage = null;
     });
     
     try {
-      debugPrint('Loading today attendance...');
-      final attendance = await _attendanceService.getTodayAttendance(
-        widget.organizationMemberId,
-      );
-      debugPrint('Today attendance loaded: ${attendance != null}');
+      debugPrint('Loading today statistics...');
+      
+      // TODO: Implement API call to get organization stats
+      // For now, using dummy data
+      await Future.delayed(const Duration(milliseconds: 500));
       
       if (mounted) {
         setState(() {
-          _todayAttendance = attendance;
-          _isLoadingAttendance = false;
+          _checkedInCount = 18;
+          _pendingCount = 5;
+          _lateCount = 2;
+          _isLoadingStats = false;
         });
       }
     } catch (e) {
-      debugPrint('!!! ERROR loading attendance: $e');
+      debugPrint('!!! ERROR loading stats: $e');
       if (mounted) {
         setState(() {
-          _isLoadingAttendance = false;
-          _errorMessage = 'Failed to load attendance: $e';
-        });
-      }
-    }
-  }
-
-  Future<void> _checkFaceRegistration() async {
-    setState(() {
-      _isCheckingFace = true;
-      _errorMessage = null;
-    });
-    
-    try {
-      debugPrint('=== CHECKING FACE REGISTRATION ===');
-      
-      final hasRegistered = await _biometricService.hasRegisteredFace(
-        widget.organizationMemberId,
-      );
-      
-      debugPrint('Face registration check result: $hasRegistered');
-      
-      if (mounted) {
-        setState(() {
-          _hasRegisteredFace = hasRegistered;
-          _isCheckingFace = false;
-        });
-      }
-    } catch (e) {
-      debugPrint('!!! ERROR checking face registration: $e');
-      if (mounted) {
-        setState(() {
-          _hasRegisteredFace = false;
-          _isCheckingFace = false;
-          _errorMessage = 'Failed to check face: $e';
+          _isLoadingStats = false;
+          _errorMessage = 'Failed to load statistics: $e';
         });
       }
     }
@@ -123,73 +80,136 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
 
   Future<void> _refreshAll() async {
     debugPrint('=== REFRESHING ALL DATA ===');
-    await Future.wait([
-      _loadTodayAttendance(),
-      _checkFaceRegistration(),
-    ]);
+    await _loadTodayStats();
   }
 
-  Future<void> _handleAttendanceAction(String type) async {
-    if (!_hasRegisteredFace) {
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Row(
-            children: [
-              Icon(Icons.face, color: Colors.blue),
-              SizedBox(width: 12),
-              Text('Face Registration Required'),
-            ],
+  Future<void> _navigateToMultiUserFaceAttendance(String type) async {
+    try {
+      final organizationId = widget.memberData['organization_id'];
+      
+      if (organizationId == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Organization ID not found')),
+        );
+        return;
+      }
+
+      // Navigate to kiosk mode face attendance
+      final result = await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => FaceAttendanceMultiUserPage(
+            organizationId: organizationId,
+            attendanceType: type,
           ),
-          content: const Text(
-            'You need to register your face first before using face recognition attendance.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                _navigateToFaceRegistration();
-              },
-              child: const Text('Register Now'),
-            ),
-          ],
         ),
       );
-      return;
-    }
 
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => FaceAttendancePage(
-          organizationMemberId: widget.organizationMemberId,
-          attendanceType: type,
-        ),
-      ),
-    );
-
-    if (result == true) {
-      _refreshAll();
+      if (result == true) {
+        _refreshAll();
+      }
+    } catch (e) {
+      debugPrint('Error navigating to multi-user face attendance: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
     }
   }
 
-  Future<void> _navigateToFaceRegistration() async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => FaceRegistrationPage(
-          organizationMemberId: widget.organizationMemberId,
+  void _handleCameraButtonPress() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Start Attendance Session',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Select the type of attendance to begin',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey.shade600,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _navigateToMultiUserFaceAttendance('check_in');
+                    },
+                    icon: const Icon(Icons.login, size: 24),
+                    label: const Text(
+                      'Check In',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _navigateToMultiUserFaceAttendance('check_out');
+                    },
+                    icon: const Icon(Icons.logout, size: 24),
+                    label: const Text(
+                      'Check Out',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
         ),
       ),
     );
-
-    if (result == true) {
-      _refreshAll();
-    }
   }
 
   void _handleNavigation(int index) {
@@ -416,7 +436,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                               ],
                             ),
                           ),
-                          // Edit Icon
+                          // Settings Icon
                           Container(
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
@@ -424,7 +444,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: const Icon(
-                              Icons.edit,
+                              Icons.settings,
                               size: 18,
                               color: Colors.black54,
                             ),
@@ -438,16 +458,84 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
 
               const SizedBox(height: 24),
 
-              // ---------- ATTENDANCE BUTTONS ----------
+              // ---------- KIOSK MODE INFO ----------
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: _AttendanceButtons(
-                  todayAttendance: _todayAttendance,
-                  hasRegisteredFace: _hasRegisteredFace,
-                  isLoading: _isLoadingAttendance,
-                  onCheckIn: () => _handleAttendanceAction('check_in'),
-                  onCheckOut: () => _handleAttendanceAction('check_out'),
-                  onRegisterFace: _navigateToFaceRegistration,
+                child: Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Colors.blue.shade50, Colors.purple.shade50],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: const Color(0xFF9333EA).withValues(alpha: 0.2),
+                      width: 2,
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF9333EA),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.camera_alt,
+                              color: Colors.white,
+                              size: 28,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Kiosk Mode Ready',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                                SizedBox(height: 4),
+                                Text(
+                                  'Multi-face detection active',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.black54,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Column(
+                          children: [
+                            _buildInfoRow(Icons.people, 'Detects 3-5 faces simultaneously'),
+                            const Divider(height: 20),
+                            _buildInfoRow(Icons.speed, 'Real-time processing'),
+                            const Divider(height: 20),
+                            _buildInfoRow(Icons.verified_user, '75% accuracy threshold'),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
 
@@ -476,7 +564,9 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                           color: Colors.purple.shade50,
                           iconColor: const Color(0xFF9333EA),
                           onTap: () {
-                            // Navigate to QR scanner
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('QR Scanner coming soon')),
+                            );
                           },
                         ),
                         const SizedBox(width: 12),
@@ -486,7 +576,9 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                           color: Colors.blue.shade50,
                           iconColor: Colors.blue,
                           onTap: () {
-                            // Navigate to manual attendance
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Manual check coming soon')),
+                            );
                           },
                         ),
                       ],
@@ -515,7 +607,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                     Row(
                       children: [
                         _StatCard(
-                          value: '18',
+                          value: _isLoadingStats ? '-' : '$_checkedInCount',
                           label: 'Checked In',
                           color: Colors.green.shade50,
                           icon: Icons.login,
@@ -523,7 +615,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                         ),
                         const SizedBox(width: 12),
                         _StatCard(
-                          value: '5',
+                          value: _isLoadingStats ? '-' : '$_pendingCount',
                           label: 'Pending',
                           color: Colors.orange.shade50,
                           icon: Icons.hourglass_empty,
@@ -531,7 +623,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                         ),
                         const SizedBox(width: 12),
                         _StatCard(
-                          value: '2',
+                          value: _isLoadingStats ? '-' : '$_lateCount',
                           label: 'Late',
                           color: Colors.red.shade50,
                           icon: Icons.warning,
@@ -564,37 +656,85 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                         ),
                         TextButton(
                           onPressed: () {
-                            // Navigate to full activity list
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Full history coming soon')),
+                            );
                           },
                           child: const Text('View All'),
                         ),
                       ],
                     ),
                     const SizedBox(height: 16),
-                    ...attendanceHistory.map((attendance) {
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _HistoryItem(
-                          studentName: attendance['studentName'],
-                          status: attendance['status'],
-                          date: attendance['date'],
-                          time: attendance['time'],
-                          icon: attendance['icon'],
-                          iconColor: attendance['iconColor'],
-                          photoUrl: attendance['photoUrl'],
+                    if (attendanceHistory.isEmpty)
+                      Container(
+                        padding: const EdgeInsets.all(40),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
                         ),
-                      );
-                    }),
+                        child: Center(
+                          child: Column(
+                            children: [
+                              Icon(
+                                Icons.history,
+                                size: 48,
+                                color: Colors.grey.shade300,
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'No recent activity',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
 
-              const SizedBox(height: 80),
+              const SizedBox(height: 100),
             ],
           ),
         ),
       ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _handleCameraButtonPress,
+        backgroundColor: const Color(0xFF9333EA),
+        elevation: 8,
+        icon: const Icon(Icons.camera_alt, color: Colors.white, size: 28),
+        label: const Text(
+          'Start Session',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       bottomNavigationBar: _buildBottomNav(),
+    );
+  }
+
+  Widget _buildInfoRow(IconData icon, String text) {
+    return Row(
+      children: [
+        Icon(icon, size: 20, color: const Color(0xFF9333EA)),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(
+              fontSize: 14,
+              color: Colors.black87,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -642,238 +782,6 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
 }
 
 // ========== SUPPORTING WIDGETS ==========
-
-class _AttendanceButtons extends StatelessWidget {
-  final AttendanceRecord? todayAttendance;
-  final bool hasRegisteredFace;
-  final bool isLoading;
-  final VoidCallback onCheckIn;
-  final VoidCallback onCheckOut;
-  final VoidCallback onRegisterFace;
-
-  const _AttendanceButtons({
-    required this.todayAttendance,
-    required this.hasRegisteredFace,
-    required this.isLoading,
-    required this.onCheckIn,
-    required this.onCheckOut,
-    required this.onRegisterFace,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (isLoading) {
-      return Container(
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: const Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    final hasCheckedIn = todayAttendance?.actualCheckIn != null;
-    final hasCheckedOut = todayAttendance?.actualCheckOut != null;
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.camera_alt, color: Color(0xFF9333EA)),
-              const SizedBox(width: 12),
-              const Text(
-                'Face Recognition Attendance',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          
-          if (!hasRegisteredFace)
-            Container(
-              padding: const EdgeInsets.all(12),
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                color: Colors.orange.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.orange.shade200),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.warning_amber, color: Colors.orange.shade700),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'Please register your face first',
-                      style: TextStyle(
-                        color: Colors.orange.shade900,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-          if (hasCheckedIn)
-            Container(
-              padding: const EdgeInsets.all(12),
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                color: hasCheckedOut ? Colors.grey.shade100 : Colors.green.shade50,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.login,
-                        color: hasCheckedOut ? Colors.grey : Colors.green,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Check In',
-                            style: TextStyle(fontSize: 12, color: Colors.black54),
-                          ),
-                          Text(
-                            _formatTime(todayAttendance!.actualCheckIn!),
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black87,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  if (hasCheckedOut)
-                    Row(
-                      children: [
-                        const Icon(Icons.logout, color: Colors.grey, size: 20),
-                        const SizedBox(width: 8),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Check Out',
-                              style: TextStyle(fontSize: 12, color: Colors.black54),
-                            ),
-                            Text(
-                              _formatTime(todayAttendance!.actualCheckOut!),
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black87,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                ],
-              ),
-            ),
-
-          Row(
-            children: [
-              if (!hasRegisteredFace)
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: onRegisterFace,
-                    icon: const Icon(Icons.face),
-                    label: const Text('Register Face'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF9333EA),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                )
-              else ...[
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: hasCheckedIn ? null : onCheckIn,
-                    icon: const Icon(Icons.login),
-                    label: const Text('Check In'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: hasCheckedIn ? Colors.grey : Colors.green,
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: Colors.grey.shade300,
-                      disabledForegroundColor: Colors.grey.shade600,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: (!hasCheckedIn || hasCheckedOut) ? null : onCheckOut,
-                    icon: const Icon(Icons.logout),
-                    label: const Text('Check Out'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: (!hasCheckedIn || hasCheckedOut) 
-                          ? Colors.grey 
-                          : Colors.red,
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: Colors.grey.shade300,
-                      disabledForegroundColor: Colors.grey.shade600,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatTime(DateTime dateTime) {
-    return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
-  }
-}
 
 class _QuickActionCard extends StatelessWidget {
   final IconData icon;
@@ -969,94 +877,6 @@ class _StatCard extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _HistoryItem extends StatelessWidget {
-  final String studentName;
-  final String status;
-  final String date;
-  final String time;
-  final IconData icon;
-  final Color iconColor;
-  final String photoUrl;
-
-  const _HistoryItem({
-    required this.studentName,
-    required this.status,
-    required this.date,
-    required this.time,
-    required this.icon,
-    required this.iconColor,
-    required this.photoUrl,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 50,
-            height: 50,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: iconColor, width: 2),
-              image: DecorationImage(
-                image: NetworkImage(photoUrl),
-                fit: BoxFit.cover,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  studentName,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  status,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.grey.shade700,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  time != '-' ? '$date - $time' : date,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey.shade600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Icon(icon, color: iconColor, size: 24),
-        ],
       ),
     );
   }
