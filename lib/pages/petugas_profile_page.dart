@@ -4,8 +4,10 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import '../services/biometric_service.dart';
 import '../services/role_service.dart';
+import '../widgets/petugas_bottom_nav_simple.dart';
 import 'face_registration_page.dart';
 import 'login.dart';
+import 'petugas_dashboard.dart';
 
 class PetugasProfilePage extends StatefulWidget {
   final int organizationMemberId;
@@ -35,6 +37,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
   bool _isUploadingPhoto = false;
   bool _isEditMode = false;
   bool _isSaving = false;
+  int _currentNavIndex = 3; // Profile is index 3
   Map<String, dynamic>? _userProfile;
   Map<String, dynamic>? _organization;
 
@@ -67,6 +70,36 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
     _displayNameController.dispose();
     _phoneController.dispose();
     super.dispose();
+  }
+
+  void _handleNavigation(int index) {
+    if (index == _currentNavIndex) return;
+
+    setState(() {
+      _currentNavIndex = index;
+    });
+
+    switch (index) {
+      case 0:
+        // Home - navigate back to dashboard
+        Navigator.pop(context);
+        break;
+      case 1:
+        // Member
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Member feature coming soon')),
+        );
+        break;
+      case 2:
+        // Records
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Records feature coming soon')),
+        );
+        break;
+      case 3:
+        // Profile - stay on current page
+        break;
+    }
   }
 
   void _populateControllers() {
@@ -914,49 +947,9 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
               ),
             ),
       // ---------- BOTTOM NAVIGATION ----------
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 10,
-              offset: const Offset(0, -5),
-            ),
-          ],
-        ),
-        child: BottomNavigationBar(
-          backgroundColor: Colors.white,
-          selectedItemColor: const Color(0xFF9333EA),
-          unselectedItemColor: Colors.grey,
-          currentIndex: 3,
-          elevation: 0,
-          type: BottomNavigationBarType.fixed,
-          onTap: (index) {
-            if (index == 0) {
-              Navigator.pop(context);
-            }
-            // Handle other navigation items as needed
-          },
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.home),
-              label: 'Home',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.qr_code_scanner),
-              label: 'Scanner',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.list_alt),
-              label: 'Records',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.person),
-              label: 'Profile',
-            ),
-          ],
-        ),
+      bottomNavigationBar: PetugasBottomNavSimple(
+        currentIndex: _currentNavIndex,
+        onNavigationTap: _handleNavigation,
       ),
     );
   }

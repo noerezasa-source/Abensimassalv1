@@ -33,6 +33,8 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
   String? _errorMessage;
   int _currentNavIndex = 0;
   String _organizationTimezone = 'Asia/Jakarta'; // Default to WIB
+  Map<String, dynamic>? _organization;
+  Map<String, dynamic>? _userProfile; // Store user profile locally
 
   // Stats data
   int _checkedInCount = 0;
@@ -48,8 +50,60 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
     debugPrint('=== PETUGAS DASHBOARD INIT (KIOSK MODE) ===');
     debugPrint('Organization Member ID: ${widget.organizationMemberId}');
     debugPrint('Role: ${_roleService.getRoleName(widget.memberData)}');
+    _userProfile = widget.userProfile; // Use passed profile if available
+    _loadUserProfile(); // Load profile if not passed
     _loadOrganizationTimezone();
+    _loadOrganizationInfo();
     _refreshAll();
+  }
+
+  Future<void> _loadUserProfile() async {
+    // If userProfile already passed, don't reload
+    if (_userProfile != null) return;
+
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) {
+        debugPrint('No user logged in');
+        return;
+      }
+
+      final response = await _supabase
+          .from('user_profiles')
+          .select()
+          .eq('id', userId)
+          .maybeSingle();
+
+      if (mounted && response != null) {
+        setState(() {
+          _userProfile = response;
+        });
+        debugPrint('User profile loaded: ${_userProfile?['display_name']}');
+      }
+    } catch (e) {
+      debugPrint('Error loading user profile: $e');
+    }
+  }
+
+  Future<void> _loadOrganizationInfo() async {
+    final organizationId = widget.memberData['organization_id'] as int?;
+    if (organizationId == null) return;
+
+    try {
+      final org = await _supabase
+          .from('organizations')
+          .select('id, name, logo_url')
+          .eq('id', organizationId)
+          .maybeSingle();
+
+      if (org != null) {
+        setState(() {
+          _organization = org;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading organization info: $e');
+    }
   }
 
   Future<void> _loadOrganizationTimezone() async {
@@ -324,9 +378,9 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
         // Home - stay on current page
         break;
       case 1:
-        // Scanner
+        // Member
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('QR Scanner feature coming soon')),
+          const SnackBar(content: Text('Member feature coming soon')),
         );
         break;
       case 2:
@@ -343,13 +397,15 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
             builder: (context) => PetugasProfilePage(
               organizationMemberId: widget.organizationMemberId,
               memberData: widget.memberData,
-              userProfile: widget.userProfile,
+              userProfile: _userProfile ?? widget.userProfile,
             ),
           ),
         ).then((_) {
           setState(() {
             _currentNavIndex = 0;
           });
+          // Reload profile after returning from profile page
+          _loadUserProfile();
         });
         break;
     }
@@ -362,30 +418,53 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
     return '$weekday, ${now.day} $month ${now.year}';
   }
 
-  String _getDisplayName() {
-    final profile = widget.userProfile;
+  String _getFullName() {
+    final profile = _userProfile ?? widget.userProfile;
     if (profile == null) {
-      return 'Petugas Attendance';
+      return '';
     }
 
+    // Hanya gunakan display_name dari database
     final displayName = profile['display_name'] as String?;
     if (displayName != null && displayName.trim().isNotEmpty) {
       return displayName.trim();
     }
 
+    // Jika display_name tidak ada, gunakan first_name + middle_name + last_name
     final firstName = profile['first_name'] as String? ?? '';
+    final middleName = profile['middle_name'] as String? ?? '';
     final lastName = profile['last_name'] as String? ?? '';
-    final fullName = '$firstName $lastName'.trim();
-    return fullName.isEmpty ? 'Petugas Attendance' : fullName;
+    
+    if (middleName.isNotEmpty) {
+      return '$firstName $middleName $lastName'.trim();
+    }
+    
+    return '$firstName $lastName'.trim();
   }
 
-  ImageProvider _getProfileImage() {
-    final photoUrl =
-        _resolveProfilePhotoUrl(widget.userProfile?['profile_photo_url'] as String?);
-    if (photoUrl != null && photoUrl.isNotEmpty) {
-      return NetworkImage(photoUrl);
+  String _getEmail() {
+    return _supabase.auth.currentUser?.email ?? 'No email';
+  }
+
+  String? _getProfilePhotoUrl() {
+    final profile = _userProfile ?? widget.userProfile;
+    if (profile == null || profile['profile_photo_url'] == null) {
+      return null;
     }
-    return const AssetImage('images/logo.png');
+    
+    final photoPath = profile['profile_photo_url'] as String;
+    
+    if (photoPath.trim().isEmpty) {
+      return null;
+    }
+    
+    if (photoPath.startsWith('http://') || photoPath.startsWith('https://')) {
+      return photoPath;
+    }
+    
+    return _supabase.storage
+        .from('profile-photos')
+        .getPublicUrl('mass-profile/$photoPath');
   }
 
   String _composeUserName(Map<String, dynamic>? profile) {
@@ -486,7 +565,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                   children: [
                     // Top bar
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Container(
                           padding: const EdgeInsets.all(8),
@@ -500,6 +579,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                             size: 20,
                           ),
                         ),
+                        const SizedBox(width: 8),
                         Text(
                           _getCurrentDate(),
                           style: const TextStyle(
@@ -508,24 +588,12 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                             fontWeight: FontWeight.w500,
                           ),
                         ),
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.3),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Icon(
-                            Icons.notifications,
-                            color: Colors.white,
-                            size: 20,
-                          ),
-                        ),
                       ],
                     ),
                     const SizedBox(height: 20),
                     // Profile Card with Petugas Badge
                     Container(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(20),
@@ -537,69 +605,88 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                           ),
                         ],
                       ),
-                      child: Row(
+                      child: Column(
                         children: [
-                          // Profile Image with Petugas Badge
-                          Stack(
+                          Row(
                             children: [
-                              Container(
-                                width: 60,
-                                height: 60,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: const Color(0xFF9333EA),
-                                    width: 2,
-                                  ),
-                                  image: DecorationImage(
-                                    image: _getProfileImage(),
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
-                              ),
-                              Positioned(
-                                bottom: 0,
-                                right: 0,
-                                child: Container(
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF9333EA),
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: Colors.white,
-                                      width: 2,
+                              // Profile Image with Petugas Badge
+                              Stack(
+                                children: [
+                                  Container(
+                                    width: 80,
+                                    height: 80,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: const Color(0xFF9333EA),
+                                        width: 3,
+                                      ),
+                                      color: Colors.grey.shade100,
+                                    ),
+                                    child: ClipOval(
+                                      child: _getProfilePhotoUrl() != null
+                                          ? Image.network(
+                                              _getProfilePhotoUrl()!,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (context, error, stackTrace) {
+                                                return const Icon(
+                                                  Icons.person,
+                                                  size: 40,
+                                                  color: Colors.grey,
+                                                );
+                                              },
+                                            )
+                                          : const Icon(
+                                              Icons.person,
+                                              size: 40,
+                                              color: Colors.grey,
+                                            ),
                                     ),
                                   ),
-                                  child: const Icon(
-                                    Icons.badge,
-                                    size: 16,
-                                    color: Colors.white,
+                                  Positioned(
+                                    top: 0,
+                                    right: 0,
+                                    child: Container(
+                                      padding: const EdgeInsets.all(6),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF9333EA),
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: Colors.white,
+                                          width: 3,
+                                        ),
+                                      ),
+                                      child: const Icon(
+                                        Icons.badge,
+                                        size: 18,
+                                        color: Colors.white,
+                                      ),
+                                    ),
                                   ),
-                                ),
+                                ],
                               ),
-                            ],
-                          ),
-                          const SizedBox(width: 16),
-                          // Profile Info
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _getDisplayName(),
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Row(
+                              const SizedBox(width: 16),
+                              // Profile Info
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
+                                    Text(
+                                      _getFullName().isNotEmpty 
+                                          ? _getFullName() 
+                                          : 'User',
+                                      style: const TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.black87,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    // Petugas Badge
                                     Container(
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 12,
-                                        vertical: 4,
+                                        vertical: 6,
                                       ),
                                       decoration: BoxDecoration(
                                         color: const Color(0xFFF3E8FF),
@@ -613,7 +700,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                                             size: 14,
                                             color: Color(0xFF9333EA),
                                           ),
-                                          const SizedBox(width: 4),
+                                          const SizedBox(width: 6),
                                           Text(
                                             _roleService.getRoleName(widget.memberData),
                                             style: const TextStyle(
@@ -625,23 +712,35 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                                         ],
                                       ),
                                     ),
+                                    if (_organization != null) ...[
+                                      const SizedBox(height: 8),
+                                      const SizedBox(height: 6),
+                                      // Organization
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.business,
+                                            size: 14,
+                                            color: Colors.grey.shade600,
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Expanded(
+                                            child: Text(
+                                              _organization!['name'] ?? 'Unknown Organization',
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                color: Colors.grey.shade600,
+                                              ),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
                                   ],
                                 ),
-                              ],
-                            ),
-                          ),
-                          // Settings Icon
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF5F5F5),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: const Icon(
-                              Icons.settings,
-                              size: 18,
-                              color: Colors.black54,
-                            ),
+                              ),
+                            ],
                           ),
                         ],
                       ),

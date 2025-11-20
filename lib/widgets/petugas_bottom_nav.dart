@@ -45,8 +45,8 @@ class PetugasBottomNav extends StatelessWidget {
                 ),
                 _buildNavItem(
                   context,
-                  Icons.qr_code_scanner_rounded,
-                  'Scanner',
+                  Icons.people_rounded,
+                  'Member',
                   1,
                 ),
                 // Spacer untuk tombol attendance di tengah
