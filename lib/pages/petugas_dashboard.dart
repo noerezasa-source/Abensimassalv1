@@ -38,6 +38,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
 
   // Stats data
   int _checkedInCount = 0;
+  int _checkedOutCount = 0;
   int _pendingCount = 0;
   int _lateCount = 0;
 
@@ -151,6 +152,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
       if (mounted) {
         setState(() {
           _checkedInCount = stats['checked_in'] ?? 0;
+          _checkedOutCount = stats['checked_out'] ?? 0;
           _pendingCount = stats['pending'] ?? 0;
           _lateCount = stats['late'] ?? 0;
           _isLoadingStats = false;
@@ -846,20 +848,34 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                     const SizedBox(height: 16),
                     Row(
                       children: [
-                        _StatCard(
-                          value: _isLoadingStats ? '-' : '$_checkedInCount',
-                          label: 'Checked In',
-                          color: Colors.green.shade50,
-                          icon: Icons.login,
-                          iconColor: Colors.green,
+                        Expanded(
+                          child: _StatCard(
+                            value: _isLoadingStats ? '-' : '$_checkedInCount',
+                            label: 'Checked In',
+                            color: Colors.green.shade50,
+                            icon: Icons.login,
+                            iconColor: Colors.green,
+                          ),
                         ),
                         const SizedBox(width: 12),
-                        _StatCard(
-                          value: _isLoadingStats ? '-' : '$_lateCount',
-                          label: 'Late',
-                          color: Colors.red.shade50,
-                          icon: Icons.warning,
-                          iconColor: Colors.red,
+                        Expanded(
+                          child: _StatCard(
+                            value: _isLoadingStats ? '-' : '$_lateCount',
+                            label: 'Late',
+                            color: Colors.yellow.shade50,
+                            icon: Icons.warning,
+                            iconColor: Colors.orange,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _StatCard(
+                            value: _isLoadingStats ? '-' : '$_checkedOutCount',
+                            label: 'Checked Out',
+                            color: Colors.red.shade50,
+                            icon: Icons.logout,
+                            iconColor: Colors.red,
+                          ),
                         ),
                       ],
                     ),

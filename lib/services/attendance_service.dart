@@ -305,6 +305,7 @@ class AttendanceService {
           .select('''
             id,
             actual_check_in,
+            actual_check_out,
             validation_status,
             late_minutes,
             organization_members!inner(organization_id)
@@ -313,6 +314,7 @@ class AttendanceService {
           .eq('organization_members.organization_id', organizationId);
 
       int checkedIn = 0;
+      int checkedOut = 0;
       int pending = 0;
       int late = 0;
 
@@ -321,6 +323,10 @@ class AttendanceService {
 
         if (data['actual_check_in'] != null) {
           checkedIn++;
+        }
+
+        if (data['actual_check_out'] != null) {
+          checkedOut++;
         }
 
         if ((data['validation_status'] as String?) == 'pending') {
@@ -333,7 +339,7 @@ class AttendanceService {
         }
       }
 
-      return {'checked_in': checkedIn, 'pending': pending, 'late': late};
+      return {'checked_in': checkedIn, 'checked_out': checkedOut, 'pending': pending, 'late': late};
     } catch (e) {
       throw Exception('Failed to load organization stats: $e');
     }
