@@ -98,65 +98,86 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
   }
 
   Future<void> _loadAttendanceStats() async {
-    setState(() {
-      _isLoadingStats = true;
-    });
+  setState(() {
+    _isLoadingStats = true;
+  });
 
-    try {
-      final now = DateTime.now();
-      final firstDayOfMonth = DateTime(now.year, now.month, 1);
-      final lastDayOfMonth = DateTime(now.year, now.month + 1, 0);
+  try {
+    final now = DateTime.now();
+    final firstDayOfMonth = DateTime(now.year, now.month, 1);
+    final lastDayOfMonth = DateTime(now.year, now.month + 1, 0);
 
-      // Get attendance records for current month
-      final records = await _supabase
-          .from('attendance_records')
-          .select()
-          .eq('organization_member_id', widget.organizationMemberId)
-          .gte('attendance_date', firstDayOfMonth.toIso8601String().split('T')[0])
-          .lte('attendance_date', lastDayOfMonth.toIso8601String().split('T')[0]);
+    // Get attendance records for current month - FILTER HANYA FACE RECOGNITION KIOSK
+    final records = await _supabase
+        .from('attendance_records')
+        .select()
+        .eq('organization_member_id', widget.organizationMemberId)
+        .eq('check_in_method', 'face_recognition_kiosk')
+        .gte('attendance_date', firstDayOfMonth.toIso8601String().split('T')[0])
+        .lte('attendance_date', lastDayOfMonth.toIso8601String().split('T')[0]);
 
-      int presentDays = 0;
-      int lateDays = 0;
-      int totalWorkHours = 0;
+    int presentDays = 0;
+    int lateDays = 0;
+    int totalWorkMinutes = 0;
 
-      for (var record in records) {
-        if (record['actual_check_in'] != null) {
+    for (var record in records) {
+      // HITUNG PRESENT: Jika ada actual_check_in DAN status = 'present' atau 'late'
+      if (record['actual_check_in'] != null) {
+        final status = record['status']?.toString().toLowerCase();
+        
+        // Present jika ada check_in (termasuk yang late)
+        if (status == 'present' || status == 'late') {
           presentDays++;
         }
-        if (record['late_minutes'] != null && record['late_minutes'] > 0) {
-          lateDays++;
-        }
-        if (record['work_duration_minutes'] != null) {
-          totalWorkHours += (record['work_duration_minutes'] as int);
-        }
       }
 
-      if (mounted) {
-        setState(() {
-          _attendanceStats = {
-            'present_days': presentDays,
-            'late_days': lateDays,
-            'work_hours': (totalWorkHours / 60).toStringAsFixed(1),
-            'total_records': records.length,
-          };
-          _isLoadingStats = false;
-        });
+      // HITUNG LATE: Jika late_minutes > 0
+      if (record['late_minutes'] != null && record['late_minutes'] > 0) {
+        lateDays++;
       }
-    } catch (e) {
-      print('!!! ERROR loading attendance stats: $e');
-      if (mounted) {
-        setState(() {
-          _attendanceStats = {
-            'present_days': 0,
-            'late_days': 0,
-            'work_hours': '0.0',
-            'total_records': 0,
-          };
-          _isLoadingStats = false;
-        });
+
+      // HITUNG WORK HOURS: Dari work_duration_minutes
+      if (record['work_duration_minutes'] != null) {
+        totalWorkMinutes += (record['work_duration_minutes'] as int);
       }
     }
+
+    // Konversi minutes ke hours dengan 1 desimal
+    final workHours = (totalWorkMinutes / 60).toStringAsFixed(1);
+
+    if (mounted) {
+      setState(() {
+        _attendanceStats = {
+          'present_days': presentDays,
+          'late_days': lateDays,
+          'work_hours': workHours,
+          'total_records': records.length,
+        };
+        _isLoadingStats = false;
+      });
+      
+      // Debug print untuk memastikan
+      print('=== ATTENDANCE STATS ===');
+      print('Total Records: ${records.length}');
+      print('Present Days: $presentDays');
+      print('Late Days: $lateDays');
+      print('Work Hours: $workHours');
+    }
+  } catch (e) {
+    print('!!! ERROR loading attendance stats: $e');
+    if (mounted) {
+      setState(() {
+        _attendanceStats = {
+          'present_days': 0,
+          'late_days': 0,
+          'work_hours': '0.0',
+          'total_records': 0,
+        };
+        _isLoadingStats = false;
+      });
+    }
   }
+}
 
   Future<void> _loadAttendanceData() async {
     setState(() {
