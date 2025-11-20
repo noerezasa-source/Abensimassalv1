@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/attendance_service.dart';
 import '../services/role_service.dart';
+import '../widgets/petugas_bottom_nav.dart';
 import 'face_attendance_multi_user_page.dart';
 import 'petugas_profile_page.dart';
 
@@ -651,88 +652,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
 
               const SizedBox(height: 24),
 
-              // ---------- KIOSK MODE INFO ----------
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [Colors.blue.shade50, Colors.purple.shade50],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: const Color(0xFF9333EA).withValues(alpha: 0.2),
-                      width: 2,
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF9333EA),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Icon(
-                              Icons.camera_alt,
-                              color: Colors.white,
-                              size: 28,
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          const Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Kiosk Mode Ready',
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                                SizedBox(height: 4),
-                                Text(
-                                  'Multi-face detection active',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.black54,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Column(
-                          children: [
-                            _buildInfoRow(Icons.people, 'Detects 3-5 faces simultaneously'),
-                            const Divider(height: 20),
-                            _buildInfoRow(Icons.speed, 'Real-time processing'),
-                            const Divider(height: 20),
-                            _buildInfoRow(Icons.verified_user, '75% accuracy threshold'),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 24),
+            
 
               // ---------- QUICK ACTIONS ----------
               Padding(
@@ -751,17 +671,6 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                     const SizedBox(height: 16),
                     Row(
                       children: [
-                        _QuickActionCard(
-                          icon: Icons.qr_code_scanner,
-                          label: 'Scan QR',
-                          color: Colors.purple.shade50,
-                          iconColor: const Color(0xFF9333EA),
-                          onTap: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('QR Scanner coming soon')),
-                            );
-                          },
-                        ),
                         const SizedBox(width: 12),
                         _QuickActionCard(
                           icon: Icons.people,
@@ -805,14 +714,6 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                           color: Colors.green.shade50,
                           icon: Icons.login,
                           iconColor: Colors.green,
-                        ),
-                        const SizedBox(width: 12),
-                        _StatCard(
-                          value: _isLoadingStats ? '-' : '$_pendingCount',
-                          label: 'Pending',
-                          color: Colors.orange.shade50,
-                          icon: Icons.hourglass_empty,
-                          iconColor: Colors.orange,
                         ),
                         const SizedBox(width: 12),
                         _StatCard(
@@ -911,22 +812,11 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _handleCameraButtonPress,
-        backgroundColor: const Color(0xFF9333EA),
-        elevation: 8,
-        icon: const Icon(Icons.camera_alt, color: Colors.white, size: 28),
-        label: const Text(
-          'Start Session',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
+      bottomNavigationBar: PetugasBottomNav(
+        currentIndex: _currentNavIndex,
+        onNavigationTap: _handleNavigation,
+        onAttendanceTap: _handleCameraButtonPress,
       ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      bottomNavigationBar: _buildBottomNav(),
     );
   }
 
@@ -1049,47 +939,6 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
     );
   }
 
-  Widget _buildBottomNav() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, -5),
-          ),
-        ],
-      ),
-      child: BottomNavigationBar(
-        backgroundColor: Colors.white,
-        selectedItemColor: const Color(0xFF9333EA),
-        unselectedItemColor: Colors.grey,
-        currentIndex: _currentNavIndex,
-        elevation: 0,
-        type: BottomNavigationBarType.fixed,
-        onTap: _handleNavigation,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.qr_code_scanner),
-            label: 'Scanner',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.list_alt),
-            label: 'Records',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person),
-            label: 'Profile',
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 // ========== SUPPORTING WIDGETS ==========
