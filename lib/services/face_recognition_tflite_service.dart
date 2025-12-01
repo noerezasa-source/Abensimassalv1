@@ -16,6 +16,11 @@ class FaceRecognitionTFLiteService {
   static const int inputSize = 112;
   static const int embeddingSize = 192;
   
+  // ✅ IMPROVED: Stricter quality thresholds
+  static const double minFaceQualityScore = 0.6;
+  static const double minEyeOpenProbability = 0.4;
+  static const double maxHeadRotation = 20.0;
+  
   FaceRecognitionTFLiteService() {
     _faceDetector = FaceDetector(
       options: FaceDetectorOptions(
@@ -24,7 +29,7 @@ class FaceRecognitionTFLiteService {
         enableClassification: true,
         enableTracking: false,
         performanceMode: FaceDetectorMode.accurate,
-        minFaceSize: 0.10, // Lowered from 0.15 for better detection
+        minFaceSize: 0.12, // ✅ Slightly increased for better quality
       ),
     );
   }
@@ -62,6 +67,66 @@ class FaceRecognitionTFLiteService {
     return faces;
   }
 
+  // ✅ NEW: Calculate face quality score
+  double calculateFaceQuality(Face face) {
+    double qualityScore = 1.0;
+    
+    // Eye openness (40% weight)
+    final leftEyeOpen = face.leftEyeOpenProbability ?? 0.0;
+    final rightEyeOpen = face.rightEyeOpenProbability ?? 0.0;
+    final eyeScore = (leftEyeOpen + rightEyeOpen) / 2.0;
+    qualityScore *= (0.6 + eyeScore * 0.4);
+    
+    // Head rotation (30% weight)
+    final headY = (face.headEulerAngleY ?? 0.0).abs();
+    final headZ = (face.headEulerAngleZ ?? 0.0).abs();
+    final rotationPenalty = (headY + headZ) / 100.0; // normalize
+    qualityScore *= (1.0 - rotationPenalty.clamp(0.0, 0.3));
+    
+    // Face size (30% weight) - larger faces are better
+    final faceArea = face.boundingBox.width * face.boundingBox.height;
+    final sizeScore = (faceArea / 100000.0).clamp(0.0, 1.0);
+    qualityScore *= (0.7 + sizeScore * 0.3);
+    
+    return qualityScore.clamp(0.0, 1.0);
+  }
+
+  // ✅ IMPROVED: Filter faces by quality before processing
+  bool isValidFaceForRecognition(Face face) {
+    // Check eye openness
+    final leftEyeOpen = face.leftEyeOpenProbability ?? 0.0;
+    final rightEyeOpen = face.rightEyeOpenProbability ?? 0.0;
+    if (leftEyeOpen < minEyeOpenProbability || rightEyeOpen < minEyeOpenProbability) {
+      debugPrint('❌ Face rejected: Eyes not open enough');
+      return false;
+    }
+    
+    // Check head rotation
+    final headY = (face.headEulerAngleY ?? 0.0).abs();
+    final headZ = (face.headEulerAngleZ ?? 0.0).abs();
+    if (headY > maxHeadRotation || headZ > maxHeadRotation) {
+      debugPrint('❌ Face rejected: Head rotation too large');
+      return false;
+    }
+    
+    // Check face size
+    final faceArea = face.boundingBox.width * face.boundingBox.height;
+    if (faceArea < 8000) { // Minimum face area
+      debugPrint('❌ Face rejected: Face too small');
+      return false;
+    }
+    
+    // Calculate overall quality
+    final qualityScore = calculateFaceQuality(face);
+    if (qualityScore < minFaceQualityScore) {
+      debugPrint('❌ Face rejected: Quality score too low (${qualityScore.toStringAsFixed(2)})');
+      return false;
+    }
+    
+    debugPrint('✅ Face quality: ${qualityScore.toStringAsFixed(2)}');
+    return true;
+  }
+
   Future<Map<String, dynamic>> extractFaceFeatures(String imagePath) async {
     if (!_isInitialized) {
       await initialize();
@@ -78,6 +143,11 @@ class FaceRecognitionTFLiteService {
     }
 
     final face = faces.first;
+    
+    // ✅ IMPROVED: Validate face quality
+    if (!isValidFaceForRecognition(face)) {
+      throw Exception('Face quality insufficient. Please ensure good lighting and look straight at camera');
+    }
 
     final imageFile = File(imagePath);
     final imageBytes = await imageFile.readAsBytes();
@@ -87,11 +157,8 @@ class FaceRecognitionTFLiteService {
       throw Exception('Failed to decode image');
     }
 
-    // Enhance image for low light conditions
     final enhancedImage = _enhanceImageForLowLight(image);
-
     final faceImage = _cropFaceWithMargin(enhancedImage, face.boundingBox);
-
     final embedding = await _getEmbedding(faceImage);
 
     return _buildTemplate(face, embedding);
@@ -105,6 +172,11 @@ class FaceRecognitionTFLiteService {
       await initialize();
     }
 
+    // ✅ IMPROVED: Validate face quality before processing
+    if (!isValidFaceForRecognition(face)) {
+      throw Exception('Face quality insufficient');
+    }
+
     final imageFile = File(imagePath);
     final imageBytes = await imageFile.readAsBytes();
     final image = img.decodeImage(imageBytes);
@@ -113,9 +185,7 @@ class FaceRecognitionTFLiteService {
       throw Exception('Failed to decode image');
     }
 
-    // Enhance for low light
     final enhancedImage = _enhanceImageForLowLight(image);
-
     final faceImage = _cropFaceWithMargin(enhancedImage, face.boundingBox);
     final embedding = await _getEmbedding(faceImage);
 
@@ -124,14 +194,12 @@ class FaceRecognitionTFLiteService {
 
   /// Enhance image for low light conditions
   img.Image _enhanceImageForLowLight(img.Image image) {
-    // Calculate average brightness
     int totalBrightness = 0;
     int pixelCount = 0;
     
     for (int y = 0; y < image.height; y++) {
       for (int x = 0; x < image.width; x++) {
         final pixel = image.getPixel(x, y);
-        // Calculate luminance (perceived brightness)
         final brightness = (0.299 * pixel.r + 0.587 * pixel.g + 0.114 * pixel.b).toInt();
         totalBrightness += brightness;
         pixelCount++;
@@ -140,40 +208,39 @@ class FaceRecognitionTFLiteService {
     
     final avgBrightness = totalBrightness / pixelCount;
     
-    // If image is dark (avg brightness < 100), enhance it
+    // ✅ IMPROVED: More aggressive enhancement for consistency
     if (avgBrightness < 100) {
       debugPrint('Low light detected (brightness: ${avgBrightness.toStringAsFixed(1)}), enhancing...');
       
-      // Increase brightness and contrast more aggressively
-      final brightnessFactor = 1.3 + ((100 - avgBrightness) / 200);
-      final contrastFactor = 1.2 + ((100 - avgBrightness) / 300);
+      final brightnessFactor = 1.4 + ((100 - avgBrightness) / 180);
+      final contrastFactor = 1.25 + ((100 - avgBrightness) / 250);
       
       return img.adjustColor(
         image,
         brightness: brightnessFactor,
         contrast: contrastFactor,
-        saturation: 1.1, // Slightly increase saturation
+        saturation: 1.15,
       );
     } else if (avgBrightness < 130) {
-      // Moderate enhancement for medium-low light
       debugPrint('Medium-low light (brightness: ${avgBrightness.toStringAsFixed(1)}), slight enhancement...');
       
       return img.adjustColor(
         image,
-        brightness: 1.15,
-        contrast: 1.1,
+        brightness: 1.2,
+        contrast: 1.15,
+        saturation: 1.05,
       );
     }
     
-    // Good lighting, minimal enhancement
     return img.adjustColor(
       image,
-      contrast: 1.05, // Slight contrast boost for clarity
+      contrast: 1.08,
     );
   }
 
   img.Image _cropFaceWithMargin(img.Image image, Rect boundingBox) {
-    const margin = 0.3;
+    // ✅ IMPROVED: Slightly larger margin for better context
+    const margin = 0.35;
     final marginW = boundingBox.width * margin;
     final marginH = boundingBox.height * margin;
 
@@ -190,6 +257,7 @@ class FaceRecognitionTFLiteService {
 
     final croppedFace = img.copyCrop(image, x: x, y: y, width: w, height: h);
     
+    // ✅ IMPROVED: Use lanczos for better quality
     return img.copyResize(
       croppedFace,
       width: inputSize,
@@ -249,10 +317,13 @@ class FaceRecognitionTFLiteService {
   }
 
   Map<String, dynamic> _buildTemplate(Face face, List<double> embedding) {
+    final qualityScore = calculateFaceQuality(face);
+    
     return {
       'version': 3,
       'embedding': embedding,
       'embeddingSize': embedding.length,
+      'qualityScore': qualityScore, // ✅ NEW: Store quality score
       'boundingBox': {
         'left': face.boundingBox.left,
         'top': face.boundingBox.top,
@@ -271,6 +342,7 @@ class FaceRecognitionTFLiteService {
     };
   }
 
+  // ✅ IMPROVED: More robust comparison with quality weighting
   double compareFaces(
     Map<String, dynamic> template1,
     Map<String, dynamic> template2,
@@ -287,14 +359,27 @@ class FaceRecognitionTFLiteService {
       return 0.0;
     }
 
+    // Calculate cosine similarity
     double dotProduct = 0.0;
     for (int i = 0; i < embedding1.length; i++) {
       dotProduct += embedding1[i] * embedding2[i];
     }
 
-    final similarity = (dotProduct + 1.0) / 2.0;
+    // ✅ IMPROVED: Use raw cosine similarity (already normalized embeddings)
+    final cosineSimilarity = dotProduct.clamp(-1.0, 1.0);
     
-    return similarity.clamp(0.0, 1.0);
+    // Convert from [-1, 1] to [0, 1]
+    final similarity = (cosineSimilarity + 1.0) / 2.0;
+    
+    // ✅ NEW: Apply quality weighting
+    final quality1 = (template1['qualityScore'] as num?)?.toDouble() ?? 0.8;
+    final quality2 = (template2['qualityScore'] as num?)?.toDouble() ?? 0.8;
+    final avgQuality = (quality1 + quality2) / 2.0;
+    
+    // Boost similarity if both faces are high quality
+    final weightedSimilarity = similarity * (0.7 + avgQuality * 0.3);
+    
+    return weightedSimilarity.clamp(0.0, 1.0);
   }
 
   Future<bool> validatePhotoQuality(String imagePath) async {
@@ -311,20 +396,10 @@ class FaceRecognitionTFLiteService {
 
       final face = faces.first;
 
-      // More lenient eye check for low light
-      final leftEyeOpen = face.leftEyeOpenProbability ?? 0.0;
-      final rightEyeOpen = face.rightEyeOpenProbability ?? 0.0;
-      
-      if (leftEyeOpen < 0.3 || rightEyeOpen < 0.3) {
-        throw Exception('Please open your eyes');
-      }
-
-      // More lenient rotation check
-      final headY = (face.headEulerAngleY ?? 0.0).abs();
-      final headZ = (face.headEulerAngleZ ?? 0.0).abs();
-      
-      if (headY > 25.0 || headZ > 25.0) {
-        throw Exception('Please face the camera directly');
+      // ✅ Use the new validation method
+      if (!isValidFaceForRecognition(face)) {
+        final qualityScore = calculateFaceQuality(face);
+        throw Exception('Face quality insufficient (score: ${qualityScore.toStringAsFixed(2)})');
       }
 
       final imageFile = File(imagePath);
@@ -336,11 +411,11 @@ class FaceRecognitionTFLiteService {
         final faceArea = face.boundingBox.width * face.boundingBox.height;
         final faceRatio = faceArea / imageArea;
         
-        if (faceRatio < 0.12) {
+        if (faceRatio < 0.15) { // ✅ Slightly increased minimum
           throw Exception('Face too small. Please move closer');
         }
 
-        if (faceRatio > 0.85) {
+        if (faceRatio > 0.80) {
           throw Exception('Face too close. Please move back');
         }
       }
