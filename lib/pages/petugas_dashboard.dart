@@ -340,7 +340,10 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
     }
   }
 
-  void _handleCameraButtonPress() {
+  Future<void> _handleCameraButtonPress() async {
+    // Reload RFID mode from SharedPreferences to ensure latest value
+    await _loadRfidMode();
+    
     if (_useRfidForAttendance) {
       Navigator.push(
         context,
@@ -405,11 +408,9 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
         ).then((rfidMode) {
           setState(() {
             _currentNavIndex = 0;
-            if (rfidMode != null) {
-              _useRfidForAttendance = rfidMode;
-              _saveRfidMode(rfidMode);
-            }
           });
+          // Always reload RFID mode from SharedPreferences to ensure sync
+          _loadRfidMode();
           _loadUserProfile();
         });
         break;

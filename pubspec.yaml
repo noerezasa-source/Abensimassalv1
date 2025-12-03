@@ -45,6 +45,7 @@ dependencies:
   intl: ^0.18.1
   connectivity_plus: ^5.0.2
   tflite_flutter: ^0.12.1
+  audioplayers: ^6.0.0
   
 
   # The following adds the Cupertino Icons font to your application.
@@ -78,6 +79,7 @@ flutter:
     - images/logo.png
     - assets/logo/logo_google.png
     - assets/models/
+    - assets/sounds/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

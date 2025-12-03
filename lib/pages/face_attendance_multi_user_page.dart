@@ -12,6 +12,7 @@ import '../services/attendance_service.dart';
 import '../services/supabase_storage_service.dart';
 import '../services/face_recognition_tflite_service.dart';
 import '../helpers/timezone_helper.dart';
+import '../helpers/sound_helper.dart';
 
 class FaceAttendanceMultiUserPage extends StatefulWidget {
   final int organizationId;
@@ -530,7 +531,7 @@ class _FaceAttendanceMultiUserPageState
 
     // ✅ Show result message
     if (successfulAttendances.isNotEmpty) {
-      await SystemSound.play(SystemSoundType.click);
+      await SoundHelper.playSuccessSound();
       
       final message = successfulAttendances.length == 1
           ? 'Berhasil: ${successfulAttendances.first}'

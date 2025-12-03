@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/attendance_record.dart';
 import '../services/attendance_service.dart';
 import '../helpers/timezone_helper.dart';
+import '../helpers/sound_helper.dart';
 
 class RfidAttendancePage extends StatefulWidget {
   final int organizationMemberId;
@@ -36,6 +37,11 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
 
   int? get _organizationId =>
       widget.memberData['organization_id'] as int?;
+
+  /// Get filtered entries based on current mode
+  List<_AttendanceEntry> get _filteredEntries {
+    return _entries.where((entry) => entry.action == _attendanceMode).toList();
+  }
 
   @override
   void initState() {
@@ -105,9 +111,18 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
           _organizationName.isEmpty ? 'RFID Attendance Mode' : _organizationName,
           style: const TextStyle(
             fontWeight: FontWeight.w600,
+            color: Colors.white,
           ),
         ),
-        backgroundColor: const Color(0xFF9333EA),
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF6B46C1), Color(0xFF9333EA)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+        ),
         foregroundColor: Colors.white,
         actions: [
           Container(
@@ -141,11 +156,13 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                 ),
               ),
               Expanded(
-                child: _entries.isEmpty
-                    ? const Center(
+                child: _filteredEntries.isEmpty
+                    ? Center(
                         child: Text(
-                          'Belum ada kartu RFID yang tercatat hari ini.',
-                          style: TextStyle(
+                          _attendanceMode == 'check_in'
+                              ? 'Belum ada check-in yang tercatat hari ini.'
+                              : 'Belum ada check-out yang tercatat hari ini.',
+                          style: const TextStyle(
                             color: Colors.grey,
                             fontSize: 16,
                             fontWeight: FontWeight.w500,
@@ -154,10 +171,10 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                         ),
                       )
                     : ListView.separated(
-                        itemCount: _entries.length,
+                        itemCount: _filteredEntries.length,
                         separatorBuilder: (_, __) => const SizedBox(height: 12),
                         itemBuilder: (_, index) =>
-                            _buildEntryCard(_entries[index]),
+                            _buildEntryCard(_filteredEntries[index]),
                       ),
               ),
             ],
@@ -282,28 +299,58 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
     final orgId = _organizationId;
     if (orgId == null) return null;
 
-    return _supabase
-        .from('rfid_cards')
-        .select('''
-        id,
-        card_number,
-        organization_member_id,
-        organization_members!inner(
+    try {
+      final cardData = await _supabase
+          .from('rfid_cards')
+          .select('''
           id,
-          organization_id,
-          user_id,
-          user_profiles (
-            display_name,
-            first_name,
-            last_name,
-            profile_photo_url
+          card_number,
+          organization_member_id,
+          organization_members!inner(
+            id,
+            organization_id,
+            user_id,
+            department_id,
+            user_profiles (
+              display_name,
+              first_name,
+              last_name,
+              profile_photo_url
+            )
           )
-        )
-      ''')
-        .eq('card_number', cardNumber)
-        .eq('organization_members.organization_id', orgId)
-        .eq('is_active', true)
-        .maybeSingle();
+        ''')
+          .eq('card_number', cardNumber)
+          .eq('organization_members.organization_id', orgId)
+          .eq('is_active', true)
+          .maybeSingle();
+      
+      if (cardData == null) return null;
+      
+      // Get department separately to avoid relationship ambiguity
+      final memberInfo = cardData['organization_members'] as Map<String, dynamic>? ?? {};
+      final departmentId = memberInfo['department_id'] as int?;
+      
+      if (departmentId != null) {
+        try {
+          final departmentData = await _supabase
+              .from('departments')
+              .select('id, name')
+              .eq('id', departmentId)
+              .maybeSingle();
+          
+          if (departmentData != null) {
+            memberInfo['department'] = departmentData;
+          }
+        } catch (e) {
+          debugPrint('Error loading department: $e');
+        }
+      }
+      
+      return cardData;
+    } catch (e) {
+      debugPrint('Error finding member by card: $e');
+      return null;
+    }
   }
 
   Future<void> _handleCardScan() async {
@@ -372,6 +419,9 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         action = 'check_out';
       }
 
+      // Play success sound
+      await SoundHelper.playSuccessSound();
+
       setState(() {
         final existingIndex =
             _entries.indexWhere((entry) => entry.memberId == memberId);
@@ -389,142 +439,162 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         }
         _entries.insert(0, newEntry);
       });
+    } catch (e) {
+      debugPrint('Error handling card scan: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     } finally {
       _cardController.clear();
       _cardFocusNode.requestFocus();
     }
   }
 
-  Widget _buildEntryCard(_AttendanceEntry entry) {
-    final memberName = _composeMemberName(entry.memberInfo);
-    final profile =
-        entry.memberInfo['user_profiles'] as Map<String, dynamic>? ?? {};
-    final photoPath = profile['profile_photo_url'] as String?;
+ Widget _buildEntryCard(_AttendanceEntry entry) {
+  final memberName = _composeMemberName(entry.memberInfo);
+  final profile =
+      entry.memberInfo['user_profiles'] as Map<String, dynamic>? ?? {};
+  final photoPath = profile['profile_photo_url'] as String?;
+  
+  // ✅ PERBAIKAN: Gunakan 'department' (singular) bukan 'departments'
+  final department = entry.memberInfo['department'] as Map<String, dynamic>?;
+  final departmentName = department?['name'] as String? ?? '-';
 
-    ImageProvider? imageProvider;
-    if (photoPath != null && photoPath.trim().isNotEmpty) {
-      if (photoPath.startsWith('http')) {
-        imageProvider = NetworkImage(photoPath);
-      } else {
-        imageProvider = NetworkImage(
-          _supabase.storage
-              .from('profile-photos')
-              .getPublicUrl('mass-profile/$photoPath'),
-        );
-      }
+  ImageProvider? imageProvider;
+  if (photoPath != null && photoPath.trim().isNotEmpty) {
+    if (photoPath.startsWith('http')) {
+      imageProvider = NetworkImage(photoPath);
+    } else {
+      imageProvider = NetworkImage(
+        _supabase.storage
+            .from('profile-photos')
+            .getPublicUrl('mass-profile/$photoPath'),
+      );
     }
-
-    final isCheckIn = entry.action == 'check_in';
-    final isCheckOut = entry.action == 'check_out';
-
-    // Convert UTC timestamps to organization timezone
-    final checkInTime = entry.attendance.actualCheckIn != null
-        ? TimezoneHelper.convertUtcToOrgTimezone(
-            entry.attendance.actualCheckIn!,
-            _organizationTimezone,
-          )
-        : null;
-
-    final checkOutTime = entry.attendance.actualCheckOut != null
-        ? TimezoneHelper.convertUtcToOrgTimezone(
-            entry.attendance.actualCheckOut!,
-            _organizationTimezone,
-          )
-        : null;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 28,
-                backgroundImage:
-                    imageProvider ?? const AssetImage('images/logo.png'),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      memberName,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: isCheckIn
-                      ? Colors.green.shade50
-                      : isCheckOut
-                          ? Colors.blue.shade50
-                          : Colors.grey.shade200,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  isCheckIn
-                      ? 'CHECK IN'
-                      : isCheckOut
-                          ? 'CHECK OUT'
-                          : 'COMPLETE',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: isCheckIn
-                        ? Colors.green.shade800
-                        : isCheckOut
-                            ? Colors.blue.shade800
-                            : Colors.grey.shade800,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _buildAttendanceInfoTile(
-                  label: 'Check In',
-                  value: _formatTime(checkInTime),
-                  icon: Icons.login,
-                  color: Colors.green,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildAttendanceInfoTile(
-                  label: 'Check Out',
-                  value: _formatTime(checkOutTime),
-                  icon: Icons.logout,
-                  color: Colors.red,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
   }
+
+  final isCheckIn = entry.action == 'check_in';
+  final isCheckOut = entry.action == 'check_out';
+
+  // Convert UTC timestamps to organization timezone
+  final checkInTime = entry.attendance.actualCheckIn != null
+      ? TimezoneHelper.convertUtcToOrgTimezone(
+          entry.attendance.actualCheckIn!,
+          _organizationTimezone,
+        )
+      : null;
+
+  final checkOutTime = entry.attendance.actualCheckOut != null
+      ? TimezoneHelper.convertUtcToOrgTimezone(
+          entry.attendance.actualCheckOut!,
+          _organizationTimezone,
+        )
+      : null;
+
+  // Get the relevant time based on mode
+  final displayTime = _attendanceMode == 'check_in' ? checkInTime : checkOutTime;
+  final timeString = _formatTime(displayTime);
+
+  return Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.05),
+          blurRadius: 8,
+          offset: const Offset(0, 2),
+        ),
+      ],
+    ),
+    child: Row(
+      children: [
+        CircleAvatar(
+          radius: 24,
+          backgroundImage:
+              imageProvider ?? const AssetImage('images/logo.png'),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                memberName,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                departmentName,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.grey.shade600,
+                  fontWeight: FontWeight.w500,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: isCheckIn
+                    ? Colors.green.shade50
+                    : isCheckOut
+                        ? Colors.blue.shade50
+                        : Colors.grey.shade200,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                isCheckIn
+                    ? 'IN'
+                    : isCheckOut
+                        ? 'OUT'
+                        : '-',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: isCheckIn
+                      ? Colors.green.shade800
+                      : isCheckOut
+                          ? Colors.blue.shade800
+                          : Colors.grey.shade800,
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              timeString,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
 
   Widget _buildAttendanceInfoTile({
     required String label,
