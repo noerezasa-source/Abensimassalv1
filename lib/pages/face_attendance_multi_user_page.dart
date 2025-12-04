@@ -6,13 +6,13 @@ import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../services/face_recognition_service.dart';
 import '../services/biometric_service.dart';
 import '../services/attendance_service.dart';
 import '../services/supabase_storage_service.dart';
 import '../services/face_recognition_tflite_service.dart';
 import '../helpers/timezone_helper.dart';
 import '../helpers/sound_helper.dart';
+import 'manual_check_page.dart';
 
 class FaceAttendanceMultiUserPage extends StatefulWidget {
   final int organizationId;
@@ -61,6 +61,14 @@ class _FaceAttendanceMultiUserPageState
   
   final List<Map<String, dynamic>> _recentAttendanceList = [];
   int _totalProcessedToday = 0;
+  String _organizationName = '';
+  int? _organizationMemberId;
+  
+  // Work time / Break time
+  String? _workTimeMode; // 'work_time', 'break_time', or null for auto
+  Map<String, dynamic>? _memberSchedule;
+  Timer? _scheduleCheckTimer;
+  String _attendanceMode = 'check_in'; // 'check_in', 'check_out'
 
   final Map<int, DateTime> _processedUserTimestamps = {};
   final Duration _userCooldown = const Duration(seconds: 10);
@@ -90,7 +98,8 @@ class _FaceAttendanceMultiUserPageState
   void initState() {
     super.initState();
     _enableKioskMode();
-    _loadOrganizationTimezone();
+    _loadOrganizationData();
+    _startScheduleCheck();
     _initializeFaceService();
     _initializeCamera();
     _getCurrentLocation();
@@ -126,22 +135,47 @@ class _FaceAttendanceMultiUserPageState
     }
   }
 
-  Future<void> _loadOrganizationTimezone() async {
+  Future<void> _loadOrganizationData() async {
     try {
       final org = await _supabase
           .from('organizations')
-          .select('timezone')
+          .select('timezone, name')
           .eq('id', widget.organizationId)
           .maybeSingle();
 
-      if (org != null && org['timezone'] != null) {
+      if (org != null) {
         setState(() {
-          _organizationTimezone = org['timezone'] as String;
+          if (org['timezone'] != null) {
+            _organizationTimezone = org['timezone'] as String;
+          }
+          if (org['name'] != null) {
+            _organizationName = org['name'] as String;
+          }
         });
-        debugPrint('✅ Organization timezone loaded: $_organizationTimezone');
+        debugPrint('✅ Organization data loaded: $_organizationName ($_organizationTimezone)');
+      }
+      
+      // Try to get current user's organization member ID
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId != null) {
+        final member = await _supabase
+            .from('organization_members')
+            .select('id')
+            .eq('organization_id', widget.organizationId)
+            .eq('user_id', userId)
+            .eq('is_active', true)
+            .maybeSingle();
+        
+        if (member != null) {
+          final memberId = member['id'] as int;
+          setState(() {
+            _organizationMemberId = memberId;
+          });
+          await _loadMemberSchedule(memberId);
+        }
       }
     } catch (e) {
-      debugPrint('⚠️ Error loading organization timezone: $e');
+      debugPrint('⚠️ Error loading organization data: $e');
     }
   }
 
@@ -329,8 +363,6 @@ class _FaceAttendanceMultiUserPageState
       // Process faces
       final processedUsers = <Map<String, dynamic>>[];
       final facesToProcess = faces.take(5).toList();
-      final unrecognizedCount = 0;
-      final cooldownCount = 0;
 
       for (int i = 0; i < facesToProcess.length; i++) {
         try {
@@ -456,7 +488,7 @@ class _FaceAttendanceMultiUserPageState
         
         debugPrint('Processing attendance for: $userName (ID: $memberId)');
         
-        final isCheckIn = await _shouldCheckIn(memberId);
+        final isCheckIn = _attendanceMode == 'check_in';
         final attendanceType = isCheckIn ? 'check_in' : 'check_out';
         
         debugPrint('Action for $userName: $attendanceType');
@@ -562,67 +594,193 @@ class _FaceAttendanceMultiUserPageState
     });
   }
 
-  Future<bool> _shouldCheckIn(int organizationMemberId) async {
+  void _startScheduleCheck() {
+    _scheduleCheckTimer = Timer.periodic(const Duration(seconds: 60), (timer) {
+      if (mounted && _workTimeMode == null) {
+        // Only auto-update if not manually set
+        setState(() {
+          // Trigger rebuild to update work time/break time display
+        });
+      }
+    });
+  }
+
+  Future<void> _loadMemberSchedule(int memberId) async {
     try {
-      final todayStr = TimezoneHelper.getCurrentDateInOrgTimezone(_organizationTimezone);
-
-      debugPrint('=== CHECKING ATTENDANCE STATUS ===');
-      debugPrint('Member ID: $organizationMemberId');
-      debugPrint('Date: $todayStr (Timezone: $_organizationTimezone)');
-
-      final record = await _supabase
-          .from('attendance_records')
-          .select('status, actual_check_in, actual_check_out')
-          .eq('organization_member_id', organizationMemberId)
-          .eq('attendance_date', todayStr)
+      final today = DateTime.now();
+      final todayStr = today.toIso8601String().split('T')[0];
+      
+      // Get member schedule
+      final schedule = await _supabase
+          .from('member_schedules')
+          .select('''
+            id,
+            work_schedule_id,
+            shift_id,
+            effective_date,
+            end_date
+          ''')
+          .eq('organization_member_id', memberId)
+          .eq('is_active', true)
+          .lte('effective_date', todayStr)
+          .or('end_date.is.null,end_date.gte.$todayStr')
+          .order('effective_date', ascending: false)
+          .limit(1)
           .maybeSingle();
 
-      if (record == null) {
-        debugPrint('✅ No record today → CHECK IN');
-        return true;
+      if (schedule != null) {
+        final workScheduleId = schedule['work_schedule_id'] as int?;
+        final shiftId = schedule['shift_id'] as int?;
+        
+        Map<String, dynamic>? scheduleData;
+        
+        if (shiftId != null) {
+          // Get shift details
+          final shift = await _supabase
+              .from('shifts')
+              .select('id, start_time, end_time')
+              .eq('id', shiftId)
+              .maybeSingle();
+          
+          if (shift != null) {
+            scheduleData = {
+              'type': 'shift',
+              'shift': shift,
+            };
+          }
+        } else if (workScheduleId != null) {
+          // Get work schedule details for today
+          final dayOfWeek = today.weekday % 7; // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+          
+          final workScheduleDetail = await _supabase
+              .from('work_schedule_details')
+              .select('day_of_week, start_time, end_time, break_start, break_end')
+              .eq('work_schedule_id', workScheduleId)
+              .eq('day_of_week', dayOfWeek)
+              .maybeSingle();
+          
+          if (workScheduleDetail != null) {
+            scheduleData = {
+              'type': 'work_schedule',
+              'detail': workScheduleDetail,
+            };
+          }
+        }
+        
+        if (scheduleData != null) {
+          final combinedSchedule = Map<String, dynamic>.from(schedule)
+            ..addAll(scheduleData);
+          setState(() {
+            _memberSchedule = combinedSchedule;
+          });
+          debugPrint('Member schedule loaded for face recognition');
+        }
       }
-
-      final status = record['status'] as String?;
-      final actualCheckIn = record['actual_check_in'];
-      final actualCheckOut = record['actual_check_out'];
-      
-      debugPrint('Current status: $status');
-      debugPrint('Check in: $actualCheckIn');
-      debugPrint('Check out: $actualCheckOut');
-
-      if (actualCheckIn != null && actualCheckOut == null) {
-        debugPrint('✅ Already checked in, not checked out → CHECK OUT');
-        return false;
-      }
-
-      if (actualCheckIn != null && actualCheckOut != null) {
-        debugPrint('✅ Already checked out → CHECK IN (new shift)');
-        return true;
-      }
-
-      if (status == 'present' || status == 'checked_in') {
-        debugPrint('✅ Status is present/checked_in → CHECK OUT');
-        return false;
-      }
-
-      if (status == 'checked_out' || status == 'absent') {
-        debugPrint('✅ Status is checked_out/absent → CHECK IN');
-        return true;
-      }
-
-      debugPrint('✅ Default → CHECK IN');
-      return true;
-      
     } catch (e) {
-      debugPrint('!!! ERROR checking attendance status: $e');
-      throw Exception('Cannot determine attendance status: $e');
+      debugPrint('Error loading member schedule: $e');
     }
+  }
+
+  String _getWorkTimeMode() {
+    // If manually set, return that
+    if (_workTimeMode != null) {
+      return _workTimeMode!;
+    }
+
+    // Auto-determine based on schedule
+    if (_memberSchedule == null) {
+      return 'work_time'; // Default to work time
+    }
+
+    final now = DateTime.now();
+    final orgTime = TimezoneHelper.convertUtcToOrgTimezone(
+      now.toUtc(),
+      _organizationTimezone,
+    );
+    
+    final currentTimeOfDay = TimeOfDay.fromDateTime(orgTime);
+    final currentMinutes = currentTimeOfDay.hour * 60 + currentTimeOfDay.minute;
+
+    // Check if member has shift or work schedule
+    final scheduleType = _memberSchedule!['type'] as String?;
+    
+    if (scheduleType == 'shift') {
+      // Use shift timing
+      final shift = _memberSchedule!['shift'] as Map<String, dynamic>?;
+      if (shift != null) {
+        final startTimeStr = shift['start_time'] as String?;
+        final endTimeStr = shift['end_time'] as String?;
+        
+        if (startTimeStr != null && endTimeStr != null) {
+          final startTime = _parseTimeString(startTimeStr);
+          final endTime = _parseTimeString(endTimeStr);
+          
+          if (startTime != null && endTime != null) {
+            final startMinutes = startTime.hour * 60 + startTime.minute;
+            final endMinutes = endTime.hour * 60 + endTime.minute;
+            
+            // Simple logic: if within shift time, it's work time
+            if (currentMinutes >= startMinutes && currentMinutes < endMinutes) {
+              return 'work_time';
+            }
+          }
+        }
+      }
+    } else if (scheduleType == 'work_schedule') {
+      // Use work schedule details
+      final detail = _memberSchedule!['detail'] as Map<String, dynamic>?;
+      if (detail != null) {
+        final breakStartStr = detail['break_start'] as String?;
+        final breakEndStr = detail['break_end'] as String?;
+        final startTimeStr = detail['start_time'] as String?;
+        
+        if (breakStartStr != null && breakEndStr != null && startTimeStr != null) {
+          final startTime = _parseTimeString(startTimeStr);
+          final breakStart = _parseTimeString(breakStartStr);
+          final breakEnd = _parseTimeString(breakEndStr);
+          
+          if (startTime != null && breakStart != null && breakEnd != null) {
+            final startMinutes = startTime.hour * 60 + startTime.minute;
+            final breakStartMinutes = breakStart.hour * 60 + breakStart.minute;
+            final breakEndMinutes = breakEnd.hour * 60 + breakEnd.minute;
+            
+            // If current time >= start_time and < break_start: work time
+            // If current time >= break_start and < break_end: break time
+            // If current time >= break_end: work time
+            if (currentMinutes >= startMinutes && currentMinutes < breakStartMinutes) {
+              return 'work_time';
+            } else if (currentMinutes >= breakStartMinutes && currentMinutes < breakEndMinutes) {
+              return 'break_time';
+            } else if (currentMinutes >= breakEndMinutes) {
+              return 'work_time';
+            }
+          }
+        }
+      }
+    }
+
+    return 'work_time'; // Default
+  }
+
+  TimeOfDay? _parseTimeString(String timeStr) {
+    try {
+      final parts = timeStr.split(':');
+      if (parts.length >= 2) {
+        final hour = int.parse(parts[0]);
+        final minute = int.parse(parts[1]);
+        return TimeOfDay(hour: hour, minute: minute);
+      }
+    } catch (e) {
+      debugPrint('Error parsing time string: $timeStr, error: $e');
+    }
+    return null;
   }
 
   @override
   void dispose() {
     _continuousScanTimer?.cancel();
     _messageTimer?.cancel();
+    _scheduleCheckTimer?.cancel();
     _cameraController?.dispose();
     _faceService.dispose();
     
@@ -682,7 +840,7 @@ class _FaceAttendanceMultiUserPageState
 
     return PopScope(
       canPop: false,
-      onPopInvoked: (didPop) async {
+      onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
         
         final shouldExit = await showDialog<bool>(
@@ -824,15 +982,64 @@ class _FaceAttendanceMultiUserPageState
                         }
                       },
                     ),
-                    const Text(
-                      'Absensi Wajah',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _organizationName.isEmpty ? 'Absensi Wajah' : _organizationName,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                _getWorkTimeMode() == 'break_time' ? 'Break time' : 'Work time',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.8),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              _buildModeToggle(),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: 48),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_organizationMemberId != null)
+                          IconButton(
+                            icon: const Icon(Icons.edit_note, color: Colors.white),
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => ManualCheckPage(
+                                    organizationMemberId: _organizationMemberId!,
+                                    memberData: {
+                                      'organization_id': widget.organizationId,
+                                    },
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        IconButton(
+                          icon: const Icon(Icons.more_vert, color: Colors.white),
+                          onPressed: () => _showMenu(context),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -1036,7 +1243,7 @@ class _FaceAttendanceMultiUserPageState
                                           ),
                                           const SizedBox(height: 2),
                                           Text(
-                                            isCheckIn ? 'Check In' : 'Check Out',
+                                            '${_getWorkTimeMode() == 'break_time' ? 'Break time in' : 'Work time in'} - ${isCheckIn ? 'Check In' : 'Check Out'}',
                                             style: TextStyle(
                                               fontSize: 12,
                                               color: Colors.white.withValues(alpha: 0.7),
@@ -1070,5 +1277,206 @@ class _FaceAttendanceMultiUserPageState
         ),
       ),
     );
+  }
+
+  Widget _buildModeToggle() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.3),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildToggleButton('In', 'check_in', Colors.green),
+          _buildToggleButton('Out', 'check_out', Colors.red),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToggleButton(String label, String mode, Color activeColor) {
+    final isSelected = _attendanceMode == mode;
+    return GestureDetector(
+      onTap: () {
+        if (_attendanceMode != mode) {
+          setState(() {
+            _attendanceMode = mode;
+          });
+        }
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? activeColor.withValues(alpha: 0.8)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.8),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showMenu(BuildContext context) {
+    final currentMode = _getWorkTimeMode();
+    final isAutoMode = _workTimeMode == null;
+    
+    showMenu<String>(
+      context: context,
+      position: const RelativeRect.fromLTRB(80, 50, 0, 0),
+      items: <PopupMenuEntry<String>>[
+        PopupMenuItem<String>(
+          value: 'work_time',
+          child: Row(
+            children: [
+              Icon(
+                currentMode == 'work_time' && !isAutoMode ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                color: Color(0xFF9333EA),
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'Work time',
+                style: TextStyle(fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'break_time',
+          child: Row(
+            children: [
+              Icon(
+                currentMode == 'break_time' && !isAutoMode ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                color: Color(0xFF9333EA),
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'Break time',
+                style: TextStyle(fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'auto',
+          child: Row(
+            children: [
+              Icon(
+                isAutoMode ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                color: Color(0xFF9333EA),
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'Auto (berdasarkan jadwal)',
+                style: TextStyle(fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem<String>(
+          value: 'work_schedule',
+          child: Row(
+            children: [
+              const Icon(Icons.schedule, color: Color(0xFF9333EA), size: 18),
+              const SizedBox(width: 8),
+              const Text(
+                'Work schedule mode',
+                style: TextStyle(fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'sign_data',
+          child: Row(
+            children: [
+              const Icon(Icons.sync, color: Color(0xFF9333EA), size: 18),
+              const SizedBox(width: 8),
+              const Text(
+                'Sign data / Sinkronisasi data',
+                style: TextStyle(fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ).then((value) {
+      if (value != null) {
+        _handleMenuSelection(value);
+      }
+    });
+  }
+
+  void _handleMenuSelection(String value) {
+    switch (value) {
+      case 'work_time':
+        setState(() {
+          _workTimeMode = 'work_time';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Mode diubah ke Work time'),
+            backgroundColor: Color(0xFF9333EA),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        break;
+      case 'break_time':
+        setState(() {
+          _workTimeMode = 'break_time';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Mode diubah ke Break time'),
+            backgroundColor: Color(0xFF9333EA),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        break;
+      case 'auto':
+        setState(() {
+          _workTimeMode = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Mode diubah ke Auto (berdasarkan jadwal)'),
+            backgroundColor: Color(0xFF9333EA),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        break;
+      case 'work_schedule':
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Work schedule mode - Coming soon'),
+            backgroundColor: Color(0xFF9333EA),
+          ),
+        );
+        break;
+      case 'sign_data':
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Sign data / Sinkronisasi data - Coming soon'),
+            backgroundColor: Color(0xFF9333EA),
+          ),
+        );
+        break;
+    }
   }
 }

@@ -37,6 +37,11 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
   String _organizationName = ''; // Organization name
   String _attendanceMode = 'check_in'; // 'check_in', 'check_out'
   DateTime _currentTime = DateTime.now();
+  
+  // Work time / Break time
+  String? _workTimeMode; // 'work_time', 'break_time', or null for auto
+  Map<String, dynamic>? _memberSchedule;
+  Timer? _scheduleCheckTimer;
 
   int? get _organizationId =>
       widget.memberData['organization_id'] as int?;
@@ -50,7 +55,9 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
   void initState() {
     super.initState();
     _loadOrganizationData();
+    _loadMemberSchedule();
     _startClock();
+    _startScheduleCheck();
     // Delay focus request to avoid keyboard auto-opening
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Future.delayed(const Duration(milliseconds: 100), () {
@@ -71,6 +78,187 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         timer.cancel();
       }
     });
+  }
+
+  void _startScheduleCheck() {
+    _scheduleCheckTimer = Timer.periodic(const Duration(seconds: 60), (timer) {
+      if (mounted && _workTimeMode == null) {
+        // Only auto-update if not manually set
+        setState(() {
+          // Trigger rebuild to update work time/break time display
+        });
+      }
+    });
+  }
+
+  Future<void> _loadMemberSchedule() async {
+    try {
+      final today = DateTime.now();
+      final todayStr = today.toIso8601String().split('T')[0];
+      
+      // Get member schedule
+      final schedule = await _supabase
+          .from('member_schedules')
+          .select('''
+            id,
+            work_schedule_id,
+            shift_id,
+            effective_date,
+            end_date
+          ''')
+          .eq('organization_member_id', widget.organizationMemberId)
+          .eq('is_active', true)
+          .lte('effective_date', todayStr)
+          .or('end_date.is.null,end_date.gte.$todayStr')
+          .order('effective_date', ascending: false)
+          .limit(1)
+          .maybeSingle();
+
+      if (schedule != null) {
+        final workScheduleId = schedule['work_schedule_id'] as int?;
+        final shiftId = schedule['shift_id'] as int?;
+        
+        Map<String, dynamic>? scheduleData;
+        
+        if (shiftId != null) {
+          // Get shift details
+          final shift = await _supabase
+              .from('shifts')
+              .select('id, start_time, end_time')
+              .eq('id', shiftId)
+              .maybeSingle();
+          
+          if (shift != null) {
+            scheduleData = {
+              'type': 'shift',
+              'shift': shift,
+            };
+          }
+        } else if (workScheduleId != null) {
+          // Get work schedule details for today
+          final dayOfWeek = today.weekday % 7; // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+          
+          final workScheduleDetail = await _supabase
+              .from('work_schedule_details')
+              .select('day_of_week, start_time, end_time, break_start, break_end')
+              .eq('work_schedule_id', workScheduleId)
+              .eq('day_of_week', dayOfWeek)
+              .maybeSingle();
+          
+          if (workScheduleDetail != null) {
+            scheduleData = {
+              'type': 'work_schedule',
+              'detail': workScheduleDetail,
+            };
+          }
+        }
+        
+        if (scheduleData != null) {
+          final combinedSchedule = Map<String, dynamic>.from(schedule)
+            ..addAll(scheduleData);
+          setState(() {
+            _memberSchedule = combinedSchedule;
+          });
+          debugPrint('Member schedule loaded');
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading member schedule: $e');
+    }
+  }
+
+  String _getWorkTimeMode() {
+    // If manually set, return that
+    if (_workTimeMode != null) {
+      return _workTimeMode!;
+    }
+
+    // Auto-determine based on schedule
+    if (_memberSchedule == null) {
+      return 'work_time'; // Default to work time
+    }
+
+    final orgTime = TimezoneHelper.convertUtcToOrgTimezone(
+      _currentTime.toUtc(),
+      _organizationTimezone,
+    );
+    
+    final currentTimeOfDay = TimeOfDay.fromDateTime(orgTime);
+    final currentMinutes = currentTimeOfDay.hour * 60 + currentTimeOfDay.minute;
+
+    // Check if member has shift or work schedule
+    final scheduleType = _memberSchedule!['type'] as String?;
+    
+    if (scheduleType == 'shift') {
+      // Use shift timing
+      final shift = _memberSchedule!['shift'] as Map<String, dynamic>?;
+      if (shift != null) {
+        final startTimeStr = shift['start_time'] as String?;
+        final endTimeStr = shift['end_time'] as String?;
+        
+        if (startTimeStr != null && endTimeStr != null) {
+          final startTime = _parseTimeString(startTimeStr);
+          final endTime = _parseTimeString(endTimeStr);
+          
+          if (startTime != null && endTime != null) {
+            final startMinutes = startTime.hour * 60 + startTime.minute;
+            final endMinutes = endTime.hour * 60 + endTime.minute;
+            
+            // Simple logic: if within shift time, it's work time
+            if (currentMinutes >= startMinutes && currentMinutes < endMinutes) {
+              return 'work_time';
+            }
+          }
+        }
+      }
+    } else if (scheduleType == 'work_schedule') {
+      // Use work schedule details
+      final detail = _memberSchedule!['detail'] as Map<String, dynamic>?;
+      if (detail != null) {
+        final breakStartStr = detail['break_start'] as String?;
+        final breakEndStr = detail['break_end'] as String?;
+        final startTimeStr = detail['start_time'] as String?;
+        
+        if (breakStartStr != null && breakEndStr != null && startTimeStr != null) {
+          final startTime = _parseTimeString(startTimeStr);
+          final breakStart = _parseTimeString(breakStartStr);
+          final breakEnd = _parseTimeString(breakEndStr);
+          
+          if (startTime != null && breakStart != null && breakEnd != null) {
+            final startMinutes = startTime.hour * 60 + startTime.minute;
+            final breakStartMinutes = breakStart.hour * 60 + breakStart.minute;
+            final breakEndMinutes = breakEnd.hour * 60 + breakEnd.minute;
+            
+            // If current time >= start_time and < break_start: work time
+            // If current time >= break_start and < break_end: break time
+            // If current time >= break_end: work time
+            if (currentMinutes >= startMinutes && currentMinutes < breakStartMinutes) {
+              return 'work_time';
+            } else if (currentMinutes >= breakStartMinutes && currentMinutes < breakEndMinutes) {
+              return 'break_time';
+            } else if (currentMinutes >= breakEndMinutes) {
+              return 'work_time';
+            }
+          }
+        }
+      }
+    }
+
+    return 'work_time'; // Default
+  }
+
+  TimeOfDay? _parseTimeString(String timeStr) {
+    try {
+      final parts = timeStr.split(':');
+      if (parts.length >= 2) {
+        final hour = int.parse(parts[0]);
+        final minute = int.parse(parts[1]);
+        return TimeOfDay(hour: hour, minute: minute);
+      }
+    } catch (e) {
+      debugPrint('Error parsing time string: $timeStr, error: $e');
+    }
+    return null;
   }
 
   Future<void> _loadOrganizationData() async {
@@ -103,6 +291,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
   @override
   void dispose() {
     _clockTimer?.cancel();
+    _scheduleCheckTimer?.cancel();
     _cardController.dispose();
     _cardFocusNode.dispose();
     super.dispose();
@@ -172,7 +361,6 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                 child: TextField(
                   controller: _cardController,
                   focusNode: _cardFocusNode,
-                  readOnly: true,
                   showCursor: false,
                   enableInteractiveSelection: false,
                   decoration: const InputDecoration(border: InputBorder.none),
@@ -220,13 +408,13 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.15),
+            color: Colors.black.withValues(alpha: 0.15),
             blurRadius: 20,
             offset: const Offset(0, 8),
             spreadRadius: 2,
           ),
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
+            color: Colors.black.withValues(alpha: 0.08),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -240,7 +428,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _formatDateTime(orgTime)!,
+                  _formatDateTime(orgTime),
                   style: const TextStyle(
                     fontSize: 42,
                     fontWeight: FontWeight.bold,
@@ -249,7 +437,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  _formatDate(orgTime)!,
+                  _formatDate(orgTime),
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w500,
@@ -264,7 +452,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                'Mode',
+                _getWorkTimeMode() == 'break_time' ? 'Break time' : 'Work time',
                 style: TextStyle(
                   fontSize: 11,
                   color: Colors.grey.shade600,
@@ -406,6 +594,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
       final memberOrgId = memberInfo['organization_id'] as int?;
       if (memberOrgId != _organizationId) {
         debugPrint('Member belongs to different organization: $memberOrgId vs $_organizationId');
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Kartu RFID tidak terdaftar di organisasi ini'),
@@ -414,11 +603,6 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         );
         return;
       }
-
-      final todayRecord = await _attendanceService.getTodayAttendance(
-        memberId,
-        organizationTimezone: _organizationTimezone,
-      );
 
       AttendanceRecord record;
       String action;
@@ -454,6 +638,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
       // Play success sound
       await SoundHelper.playSuccessSound();
 
+      if (!mounted) return;
       setState(() {
         final existingIndex =
             _entries.indexWhere((entry) => entry.memberId == memberId);
@@ -473,12 +658,14 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
       });
     } catch (e) {
       debugPrint('Error handling card scan: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } finally {
       _cardController.clear();
       _cardFocusNode.requestFocus();
@@ -529,6 +716,10 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
     // Get the relevant time based on mode
     final displayTime = _attendanceMode == 'check_in' ? checkInTime : checkOutTime;
     final timeString = _formatTime(displayTime);
+    
+    // Get work time mode for display
+    final workTimeMode = _getWorkTimeMode();
+    final modePrefix = workTimeMode == 'break_time' ? 'Break time in' : 'Work time in';
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -536,8 +727,8 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -568,7 +759,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  departmentName,
+                  '$modePrefix - $departmentName',
                   style: TextStyle(
                     fontSize: 13,
                     color: Colors.grey.shade600,
@@ -628,49 +819,6 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
     );
   }
 
-  Widget _buildAttendanceInfoTile({
-    required String label,
-    required String value,
-    required IconData icon,
-    required Color color,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: color, size: 20),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: color,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   String _composeMemberName(Map<String, dynamic>? memberInfo) {
     final profile = memberInfo?['user_profiles'] as Map<String, dynamic>?;
     if (profile == null) return 'Anggota';
@@ -708,10 +856,65 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
   }
 
   void _showMenu(BuildContext context) {
-    showMenu(
+    final currentMode = _getWorkTimeMode();
+    final isAutoMode = _workTimeMode == null;
+    
+    showMenu<String>(
       context: context,
       position: const RelativeRect.fromLTRB(80, 50, 0, 0),
-      items: [
+      items: <PopupMenuEntry<String>>[
+        PopupMenuItem<String>(
+          value: 'work_time',
+          child: Row(
+            children: [
+              Icon(
+                currentMode == 'work_time' && !isAutoMode ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                color: Color(0xFF9333EA),
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'Work time',
+                style: TextStyle(fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'break_time',
+          child: Row(
+            children: [
+              Icon(
+                currentMode == 'break_time' && !isAutoMode ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                color: Color(0xFF9333EA),
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'Break time',
+                style: TextStyle(fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'auto',
+          child: Row(
+            children: [
+              Icon(
+                isAutoMode ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                color: Color(0xFF9333EA),
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'Auto (berdasarkan jadwal)',
+                style: TextStyle(fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
         PopupMenuItem<String>(
           value: 'work_schedule',
           child: Row(
@@ -748,6 +951,42 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
 
   void _handleMenuSelection(String value) {
     switch (value) {
+      case 'work_time':
+        setState(() {
+          _workTimeMode = 'work_time';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Mode diubah ke Work time'),
+            backgroundColor: Color(0xFF9333EA),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        break;
+      case 'break_time':
+        setState(() {
+          _workTimeMode = 'break_time';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Mode diubah ke Break time'),
+            backgroundColor: Color(0xFF9333EA),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        break;
+      case 'auto':
+        setState(() {
+          _workTimeMode = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Mode diubah ke Auto (berdasarkan jadwal)'),
+            backgroundColor: Color(0xFF9333EA),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        break;
       case 'work_schedule':
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
