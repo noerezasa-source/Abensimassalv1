@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -5,6 +6,7 @@ import '../models/attendance_record.dart';
 import '../services/attendance_service.dart';
 import '../helpers/timezone_helper.dart';
 import '../helpers/sound_helper.dart';
+import 'manual_check_page.dart';
 
 class RfidAttendancePage extends StatefulWidget {
   final int organizationMemberId;
@@ -28,6 +30,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
 
   final TextEditingController _cardController = TextEditingController();
   final FocusNode _cardFocusNode = FocusNode();
+  Timer? _clockTimer;
 
   final List<_AttendanceEntry> _entries = [];
   String _organizationTimezone = 'Asia/Jakarta'; // Default timezone
@@ -48,23 +51,25 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
     super.initState();
     _loadOrganizationData();
     _startClock();
+    // Delay focus request to avoid keyboard auto-opening
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _cardFocusNode.requestFocus();
-      }
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) {
+          _cardFocusNode.requestFocus();
+        }
+      });
     });
   }
 
   void _startClock() {
-    Future.doWhile(() async {
-      await Future.delayed(const Duration(minutes: 1));
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) {
         setState(() {
           _currentTime = DateTime.now();
         });
-        return true;
+      } else {
+        timer.cancel();
       }
-      return false;
     });
   }
 
@@ -97,6 +102,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
 
   @override
   void dispose() {
+    _clockTimer?.cancel();
     _cardController.dispose();
     _cardFocusNode.dispose();
     super.dispose();
@@ -114,6 +120,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
             color: Colors.white,
           ),
         ),
+        titleSpacing: 8,
         flexibleSpace: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
@@ -124,13 +131,29 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
           ),
         ),
         foregroundColor: Colors.white,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        leadingWidth: 40,
         actions: [
-          Container(
-            margin: const EdgeInsets.only(right: 16),
-            child: const Icon(
-              Icons.credit_card,
-              size: 28,
-            ),
+          IconButton(
+            icon: const Icon(Icons.edit_note),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ManualCheckPage(
+                    organizationMemberId: widget.organizationMemberId,
+                    memberData: widget.memberData,
+                  ),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.more_vert),
+            onPressed: () => _showMenu(context),
           ),
         ],
       ),
@@ -149,7 +172,8 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                 child: TextField(
                   controller: _cardController,
                   focusNode: _cardFocusNode,
-                  autofocus: true,
+                  readOnly: true,
+                  showCursor: false,
                   enableInteractiveSelection: false,
                   decoration: const InputDecoration(border: InputBorder.none),
                   onSubmitted: (_) => _handleCardScan(),
@@ -159,9 +183,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                 child: _filteredEntries.isEmpty
                     ? Center(
                         child: Text(
-                          _attendanceMode == 'check_in'
-                              ? 'Belum ada check-in yang tercatat hari ini.'
-                              : 'Belum ada check-out yang tercatat hari ini.',
+                          'Scan card in here',
                           style: const TextStyle(
                             color: Colors.grey,
                             fontSize: 16,
@@ -198,7 +220,13 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withOpacity(0.15),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+            spreadRadius: 2,
+          ),
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -208,20 +236,24 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         children: [
           // Clock Section
           Expanded(
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(
-                  Icons.access_time,
-                  color: Color(0xFF9333EA),
-                  size: 28,
-                ),
-                const SizedBox(width: 12),
                 Text(
-                  _formatTime(orgTime)!,
+                  _formatDateTime(orgTime)!,
                   style: const TextStyle(
-                    fontSize: 36,
+                    fontSize: 42,
                     fontWeight: FontWeight.bold,
                     color: Color(0xFF9333EA),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _formatDate(orgTime)!,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.grey.shade600,
                   ),
                 ),
               ],
@@ -453,148 +485,148 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
     }
   }
 
- Widget _buildEntryCard(_AttendanceEntry entry) {
-  final memberName = _composeMemberName(entry.memberInfo);
-  final profile =
-      entry.memberInfo['user_profiles'] as Map<String, dynamic>? ?? {};
-  final photoPath = profile['profile_photo_url'] as String?;
-  
-  // ✅ PERBAIKAN: Gunakan 'department' (singular) bukan 'departments'
-  final department = entry.memberInfo['department'] as Map<String, dynamic>?;
-  final departmentName = department?['name'] as String? ?? '-';
+  Widget _buildEntryCard(_AttendanceEntry entry) {
+    final memberName = _composeMemberName(entry.memberInfo);
+    final profile =
+        entry.memberInfo['user_profiles'] as Map<String, dynamic>? ?? {};
+    final photoPath = profile['profile_photo_url'] as String?;
+    
+    // ✅ PERBAIKAN: Gunakan 'department' (singular) bukan 'departments'
+    final department = entry.memberInfo['department'] as Map<String, dynamic>?;
+    final departmentName = department?['name'] as String? ?? '-';
 
-  ImageProvider? imageProvider;
-  if (photoPath != null && photoPath.trim().isNotEmpty) {
-    if (photoPath.startsWith('http')) {
-      imageProvider = NetworkImage(photoPath);
-    } else {
-      imageProvider = NetworkImage(
-        _supabase.storage
-            .from('profile-photos')
-            .getPublicUrl('mass-profile/$photoPath'),
-      );
+    ImageProvider? imageProvider;
+    if (photoPath != null && photoPath.trim().isNotEmpty) {
+      if (photoPath.startsWith('http')) {
+        imageProvider = NetworkImage(photoPath);
+      } else {
+        imageProvider = NetworkImage(
+          _supabase.storage
+              .from('profile-photos')
+              .getPublicUrl('mass-profile/$photoPath'),
+        );
+      }
     }
-  }
 
-  final isCheckIn = entry.action == 'check_in';
-  final isCheckOut = entry.action == 'check_out';
+    final isCheckIn = entry.action == 'check_in';
+    final isCheckOut = entry.action == 'check_out';
 
-  // Convert UTC timestamps to organization timezone
-  final checkInTime = entry.attendance.actualCheckIn != null
-      ? TimezoneHelper.convertUtcToOrgTimezone(
-          entry.attendance.actualCheckIn!,
-          _organizationTimezone,
-        )
-      : null;
+    // Convert UTC timestamps to organization timezone
+    final checkInTime = entry.attendance.actualCheckIn != null
+        ? TimezoneHelper.convertUtcToOrgTimezone(
+            entry.attendance.actualCheckIn!,
+            _organizationTimezone,
+          )
+        : null;
 
-  final checkOutTime = entry.attendance.actualCheckOut != null
-      ? TimezoneHelper.convertUtcToOrgTimezone(
-          entry.attendance.actualCheckOut!,
-          _organizationTimezone,
-        )
-      : null;
+    final checkOutTime = entry.attendance.actualCheckOut != null
+        ? TimezoneHelper.convertUtcToOrgTimezone(
+            entry.attendance.actualCheckOut!,
+            _organizationTimezone,
+          )
+        : null;
 
-  // Get the relevant time based on mode
-  final displayTime = _attendanceMode == 'check_in' ? checkInTime : checkOutTime;
-  final timeString = _formatTime(displayTime);
+    // Get the relevant time based on mode
+    final displayTime = _attendanceMode == 'check_in' ? checkInTime : checkOutTime;
+    final timeString = _formatTime(displayTime);
 
-  return Container(
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(12),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withOpacity(0.05),
-          blurRadius: 8,
-          offset: const Offset(0, 2),
-        ),
-      ],
-    ),
-    child: Row(
-      children: [
-        CircleAvatar(
-          radius: 24,
-          backgroundImage:
-              imageProvider ?? const AssetImage('images/logo.png'),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 24,
+            backgroundImage:
+                imageProvider ?? const AssetImage('images/logo.png'),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  memberName,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  departmentName,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey.shade600,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
             mainAxisSize: MainAxisSize.min,
             children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isCheckIn
+                      ? Colors.green.shade50
+                      : isCheckOut
+                          ? Colors.blue.shade50
+                          : Colors.grey.shade200,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  isCheckIn
+                      ? 'IN'
+                      : isCheckOut
+                          ? 'OUT'
+                          : '-',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: isCheckIn
+                        ? Colors.green.shade800
+                        : isCheckOut
+                            ? Colors.blue.shade800
+                            : Colors.grey.shade800,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
               Text(
-                memberName,
+                timeString,
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                   color: Colors.black87,
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                departmentName,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.grey.shade600,
-                  fontWeight: FontWeight.w500,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
-        ),
-        const SizedBox(width: 8),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: isCheckIn
-                    ? Colors.green.shade50
-                    : isCheckOut
-                        ? Colors.blue.shade50
-                        : Colors.grey.shade200,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                isCheckIn
-                    ? 'IN'
-                    : isCheckOut
-                        ? 'OUT'
-                        : '-',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  color: isCheckIn
-                      ? Colors.green.shade800
-                      : isCheckOut
-                          ? Colors.blue.shade800
-                          : Colors.grey.shade800,
-                ),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              timeString,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-              ),
-            ),
-          ],
-        ),
-      ],
-    ),
-  );
-}
+        ],
+      ),
+    );
+  }
 
   Widget _buildAttendanceInfoTile({
     required String label,
@@ -654,7 +686,85 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
     if (time == null) return '-';
     final hour = time.hour.toString().padLeft(2, '0');
     final minute = time.minute.toString().padLeft(2, '0');
-    return '$hour:$minute';
+    final second = time.second.toString().padLeft(2, '0');
+    return '$hour:$minute:$second';
+  }
+
+  String _formatDateTime(DateTime? time) {
+    if (time == null) return '-';
+    final hour = time.hour.toString().padLeft(2, '0');
+    final minute = time.minute.toString().padLeft(2, '0');
+    final second = time.second.toString().padLeft(2, '0');
+    return '$hour:$minute:$second';
+  }
+
+  String _formatDate(DateTime? time) {
+    if (time == null) return '-';
+    final day = time.day.toString().padLeft(2, '0');
+    final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    final month = months[time.month - 1];
+    final year = time.year;
+    return '$day $month $year';
+  }
+
+  void _showMenu(BuildContext context) {
+    showMenu(
+      context: context,
+      position: const RelativeRect.fromLTRB(80, 50, 0, 0),
+      items: [
+        PopupMenuItem<String>(
+          value: 'work_schedule',
+          child: Row(
+            children: [
+              const Icon(Icons.schedule, color: Color(0xFF9333EA), size: 18),
+              const SizedBox(width: 8),
+              const Text(
+                'Work schedule mode',
+                style: TextStyle(fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'sign_data',
+          child: Row(
+            children: [
+              const Icon(Icons.sync, color: Color(0xFF9333EA), size: 18),
+              const SizedBox(width: 8),
+              const Text(
+                'Sign data / Sinkronisasi data',
+                style: TextStyle(fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ).then((value) {
+      if (value != null) {
+        _handleMenuSelection(value);
+      }
+    });
+  }
+
+  void _handleMenuSelection(String value) {
+    switch (value) {
+      case 'work_schedule':
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Work schedule mode - Coming soon'),
+            backgroundColor: Color(0xFF9333EA),
+          ),
+        );
+        break;
+      case 'sign_data':
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Sign data / Sinkronisasi data - Coming soon'),
+            backgroundColor: Color(0xFF9333EA),
+          ),
+        );
+        break;
+    }
   }
 }
 

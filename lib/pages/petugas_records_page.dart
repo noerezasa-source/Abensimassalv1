@@ -11,6 +11,7 @@ import '../helpers/timezone_helper.dart';
 import '../services/role_service.dart';
 import '../widgets/petugas_bottom_nav.dart';
 import 'petugas_dashboard.dart';
+import 'petugas_members_page.dart';
 import 'petugas_profile_page.dart';
 
 class PetugasRecordsPage extends StatefulWidget {
@@ -367,9 +368,22 @@ class _PetugasRecordsPageState extends State<PetugasRecordsPage>
         break;
       case 1:
         // Member
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Member feature coming soon')),
-        );
+        Navigator.push<bool>(
+          context,
+          MaterialPageRoute(
+            builder: (context) => PetugasMembersPage(
+              organizationMemberId: widget.organizationMemberId,
+              memberData: widget.memberData,
+              userProfile: _userProfile ?? widget.userProfile,
+            ),
+          ),
+        ).then((_) {
+          if (mounted) {
+            setState(() {
+              _currentNavIndex = 2; // Kembali ke Records index
+            });
+          }
+        });
         break;
       case 2:
         // Records - stay on current page

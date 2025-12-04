@@ -6,8 +6,9 @@ import '../services/attendance_service.dart';
 import '../services/role_service.dart';
 import '../widgets/petugas_bottom_nav.dart';
 import 'face_attendance_multi_user_page.dart';
-import 'petugas_profile_page.dart';
+import 'petugas_members_page.dart';
 import 'petugas_records_page.dart';
+import 'petugas_profile_page.dart';
 import 'rfid_attendance_page.dart';
 import 'manual_check_page.dart';
 
@@ -374,9 +375,21 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
       case 0:
         break;
       case 1:
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Member feature coming soon')),
-        );
+        Navigator.push<bool>(
+          context,
+          MaterialPageRoute(
+            builder: (context) => PetugasMembersPage(
+              organizationMemberId: widget.organizationMemberId,
+              memberData: widget.memberData,
+              userProfile: _userProfile ?? widget.userProfile,
+            ),
+          ),
+        ).then((_) {
+          setState(() {
+            _currentNavIndex = 0;
+          });
+          _refreshAll();
+        });
         break;
       case 2:
         Navigator.push<bool>(

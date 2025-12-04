@@ -12,6 +12,8 @@ import '../helpers/rfid_mode_helper.dart';
 import 'face_registration_page.dart';
 import 'login.dart';
 import 'petugas_dashboard.dart';
+import 'petugas_members_page.dart';
+import 'petugas_records_page.dart';
 
 class PetugasProfilePage extends StatefulWidget {
   final int organizationMemberId;
@@ -107,10 +109,24 @@ void _handleNavigation(int index) {
       
     case 1:
       // Member
-      debugPrint('Member feature - showing snackbar');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Member feature coming soon')),
-      );
+      debugPrint('Navigating to Members page');
+      Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (context) => PetugasMembersPage(
+            organizationMemberId: widget.organizationMemberId,
+            memberData: widget.memberData,
+            userProfile: _userProfile ?? widget.userProfile,
+          ),
+        ),
+      ).then((_) {
+        debugPrint('Returned from Members page');
+        if (mounted) {
+          setState(() {
+            _currentNavIndex = 3; // Kembali ke Profile index
+          });
+        }
+      });
       break;
       
     case 2:
