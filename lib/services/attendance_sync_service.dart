@@ -101,8 +101,19 @@ class AttendanceSyncService {
         );
       }
 
+      // Clean up duplicate records first (records marked as synced with duplicate error)
+      await cleanupDuplicateRecords();
+      
       // Get unsynced records
       final unsyncedRecords = await _offlineDb.getUnsyncedAttendances();
+      
+      debugPrint('📊 Found ${unsyncedRecords.length} unsynced records');
+      if (unsyncedRecords.isNotEmpty) {
+        debugPrint('📋 Records to sync:');
+        for (var record in unsyncedRecords) {
+          debugPrint('   - ID: ${record.id}, Method: ${record.method}, Member: ${record.userName ?? record.cardNumber}, Event: ${record.eventType}');
+        }
+      }
       
       if (unsyncedRecords.isEmpty) {
         if (showProgress) {
@@ -135,9 +146,12 @@ class AttendanceSyncService {
       for (int i = 0; i < unsyncedRecords.length; i++) {
         final record = unsyncedRecords[i];
         
+        debugPrint('🔄 [${i + 1}/${unsyncedRecords.length}] Syncing record ID: ${record.id}, Method: ${record.method}, Member: ${record.userName ?? record.cardNumber}');
+        
         try {
           await _syncSingleRecord(record);
           syncedCount++;
+          debugPrint('✅ [${i + 1}/${unsyncedRecords.length}] Successfully synced record ID: ${record.id}');
           
           // Mark as synced
           await _offlineDb.updateSyncStatus(
@@ -160,21 +174,34 @@ class AttendanceSyncService {
                              errorMessage.toLowerCase().contains('duplicate');
           
           if (isDuplicate) {
-            // If duplicate, mark as synced and delete (data already exists in online DB)
+            // If duplicate, delete the record since data already exists in server
+            // No need to keep it as it's already synced
             debugPrint('⚠️ Duplicate attendance detected during sync for record ${record.id}: $errorMessage');
-            await _offlineDb.updateSyncStatus(
-              id: record.id!,
-              isSynced: true, // Mark as synced since data already exists
-              syncError: 'Duplicate: Data already exists in server',
-            );
+            debugPrint('🗑️ Deleting duplicate record ${record.id} since data already exists in server');
+            try {
+              await _offlineDb.deleteAttendance(record.id!);
+              debugPrint('✅ Duplicate record ${record.id} deleted successfully');
+            } catch (deleteError) {
+              debugPrint('❌ Failed to delete duplicate record ${record.id}: $deleteError');
+              // If delete fails, mark as synced so it won't be retried
+              await _offlineDb.updateSyncStatus(
+                id: record.id!,
+                isSynced: true,
+                syncError: 'Duplicate: Data already exists in server',
+              );
+            }
             syncedCount++; // Count as synced since data is already on server
           } else {
             failedCount++;
             final error = 'Failed: ${record.userName ?? record.cardNumber} - $e';
             errors.add(error);
-            debugPrint('Sync failed for record ${record.id}: $e');
+            debugPrint('❌ [${i + 1}/${unsyncedRecords.length}] Sync failed for record ${record.id}: $e');
+            debugPrint('   Method: ${record.method}');
+            debugPrint('   Member ID: ${record.organizationMemberId}');
+            debugPrint('   Event Type: ${record.eventType}');
+            debugPrint('   Error details: ${e.toString()}');
             
-            // Update with error
+            // Update with error - keep record for retry
             await _offlineDb.updateSyncStatus(
               id: record.id!,
               isSynced: false,
@@ -184,9 +211,13 @@ class AttendanceSyncService {
         }
       }
 
-      // Delete successfully synced records
+      // Delete only successfully synced records (not failed or duplicate)
+      // Only delete records that were actually synced in this batch
+      // Don't delete records that failed or were marked as duplicate
       if (syncedCount > 0) {
-        await _offlineDb.deleteSyncedAttendances();
+        // Only delete records that are marked as synced AND don't have sync errors
+        // This ensures failed records are kept for retry
+        await _offlineDb.deleteSuccessfullySyncedAttendances();
       }
 
       final message = syncedCount > 0
@@ -240,7 +271,8 @@ class AttendanceSyncService {
           id, card_number, organization_member_id,
           organization_members!inner(
             id, organization_id, user_id, department_id,
-            user_profiles (display_name, first_name, last_name, profile_photo_url)
+            user_profiles (display_name, first_name, last_name, profile_photo_url),
+            departments!organization_members_department_id_fkey (id, name)
           )
         ''')
           .eq('card_number', record.cardNumber)
@@ -278,28 +310,42 @@ class AttendanceSyncService {
     else if (record.organizationMemberId != null) {
       memberId = record.organizationMemberId!;
       
-      // Fetch latest member data and update cache
-      final memberData = await _supabase
-          .from('organization_members')
-          .select('''
-          id, organization_id, user_id, department_id,
-          user_profiles (display_name, first_name, last_name, profile_photo_url),
-          departments!inner (id, name)
-        ''')
-          .eq('id', memberId)
-          .eq('is_active', true)
-          .maybeSingle();
+      debugPrint('🔄 Syncing face recognition attendance for member ID: $memberId');
       
-      if (memberData != null) {
-        // Create card-like structure for caching
-        final cardData = {
-          'id': 'face_recognition',
-          'card_number': null,
-          'organization_member_id': memberId,
-          'organization_members': memberData,
-        };
+      // Fetch latest member data and update cache
+      try {
+        final memberData = await _supabase
+            .from('organization_members')
+            .select('''
+            id, organization_id, user_id, department_id,
+            user_profiles (display_name, first_name, last_name, profile_photo_url),
+            departments!organization_members_department_id_fkey (id, name)
+          ''')
+            .eq('id', memberId)
+            .eq('is_active', true)
+            .maybeSingle();
         
-        await _offlineDb.cacheMemberData(cardData);
+        if (memberData == null) {
+          throw Exception('Organization member not found or inactive: $memberId');
+        }
+        
+        debugPrint('✅ Found member data for ID: $memberId');
+        
+        // Create card-like structure for caching (skip if card_number is null to avoid cache errors)
+        try {
+          final cardData = {
+            'id': 'face_recognition_$memberId',
+            'card_number': record.cardNumber, // Use the FACE_$memberId format
+            'organization_member_id': memberId,
+            'organization_members': memberData,
+          };
+          
+          await _offlineDb.cacheMemberData(cardData);
+          debugPrint('✅ Cached member data for face recognition');
+        } catch (cacheError) {
+          debugPrint('⚠️ Failed to cache member data (non-critical): $cacheError');
+          // Continue even if cache fails
+        }
         
         // Update the record with latest member info
         final profile = memberData['user_profiles'] as Map<String, dynamic>?;
@@ -313,11 +359,17 @@ class AttendanceSyncService {
           
           if (userName != null && userName.isNotEmpty) {
             await _offlineDb.updateAttendanceUserName(record.id!, userName);
+            debugPrint('✅ Updated attendance user name: $userName');
           }
+        } else {
+          debugPrint('⚠️ No user profile found for member ID: $memberId');
         }
+      } catch (e) {
+        debugPrint('❌ Error fetching member data for face recognition: $e');
+        rethrow;
       }
     } else {
-      throw Exception('Cannot determine organization member ID');
+      throw Exception('Cannot determine organization member ID. Method: ${record.method}, CardNumber: ${record.cardNumber}');
     }
 
     // Upload photo if exists
@@ -326,16 +378,22 @@ class AttendanceSyncService {
       try {
         final photoFile = File(record.photoPath!);
         if (await photoFile.exists()) {
+          debugPrint('📸 Uploading photo for member $memberId...');
           photoUrl = await _storageService.uploadAttendancePhoto(
             photoFile,
             memberId,
             record.eventType,
           );
+          debugPrint('✅ Photo uploaded successfully: $photoUrl');
+        } else {
+          debugPrint('⚠️ Photo file does not exist: ${record.photoPath}');
         }
       } catch (e) {
-        debugPrint('Failed to upload photo: $e');
-        // Continue without photo
+        debugPrint('⚠️ Failed to upload photo (continuing without photo): $e');
+        // Continue without photo - attendance can still be recorded
       }
+    } else {
+      debugPrint('ℹ️ No photo path provided for member $memberId');
     }
 
     // Prepare location data
@@ -348,40 +406,65 @@ class AttendanceSyncService {
     }
 
     // Sync to Supabase
-    if (record.eventType == 'check_in') {
-      await _attendanceService.checkIn(
-        organizationMemberId: memberId,
-        photoUrl: photoUrl,
-        method: record.method,
-        location: locationData,
-        rawData: {
-          'synced_from_offline': true,
-          'offline_timestamp': record.timestamp,
-          'work_time_mode': record.workTimeMode,
-          if (record.method == 'rfid_card_mobile')
-            'card_number': record.cardNumber,
-        },
-      );
-    } else {
-      await _attendanceService.checkOut(
-        organizationMemberId: memberId,
-        photoUrl: photoUrl,
-        method: record.method,
-        location: locationData,
-        rawData: {
-          'synced_from_offline': true,
-          'offline_timestamp': record.timestamp,
-          'work_time_mode': record.workTimeMode,
-          if (record.method == 'rfid_card_mobile')
-            'card_number': record.cardNumber,
-        },
-      );
+    debugPrint('🔄 Syncing ${record.eventType} to Supabase for member $memberId...');
+    try {
+      if (record.eventType == 'check_in') {
+        await _attendanceService.checkIn(
+          organizationMemberId: memberId,
+          photoUrl: photoUrl,
+          method: record.method,
+          location: locationData,
+          rawData: {
+            'synced_from_offline': true,
+            'offline_timestamp': record.timestamp,
+            'work_time_mode': record.workTimeMode,
+            if (record.method == 'rfid_card_mobile')
+              'card_number': record.cardNumber,
+            if (record.method == 'face_recognition_kiosk')
+              'face_recognition': true,
+          },
+        );
+        debugPrint('✅ Successfully synced check_in for member $memberId');
+      } else {
+        await _attendanceService.checkOut(
+          organizationMemberId: memberId,
+          photoUrl: photoUrl,
+          method: record.method,
+          location: locationData,
+          rawData: {
+            'synced_from_offline': true,
+            'offline_timestamp': record.timestamp,
+            'work_time_mode': record.workTimeMode,
+            if (record.method == 'rfid_card_mobile')
+              'card_number': record.cardNumber,
+            if (record.method == 'face_recognition_kiosk')
+              'face_recognition': true,
+          },
+        );
+        debugPrint('✅ Successfully synced check_out for member $memberId');
+      }
+    } catch (e) {
+      debugPrint('❌ Error syncing attendance to Supabase: $e');
+      rethrow;
     }
   }
 
   // Add method for manual sync all
   Future<SyncResult> syncAllPendingAttendances() async {
     return await syncPendingAttendances(showProgress: true);
+  }
+
+  // Clean up duplicate records that are already marked as synced
+  Future<int> cleanupDuplicateRecords() async {
+    try {
+      debugPrint('🧹 Cleaning up duplicate records...');
+      final deletedCount = await _offlineDb.deleteDuplicateRecords();
+      debugPrint('✅ Cleaned up $deletedCount duplicate records');
+      return deletedCount;
+    } catch (e) {
+      debugPrint('❌ Error cleaning up duplicate records: $e');
+      return 0;
+    }
   }
 
   // Get sync statistics

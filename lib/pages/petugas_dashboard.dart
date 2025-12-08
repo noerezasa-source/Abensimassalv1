@@ -203,7 +203,18 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
       if (mounted) {
         setState(() {
           _isLoadingStats = false;
-          _errorMessage = 'Failed to load statistics: $e';
+          // Check if it's a network/connection error
+          final errorString = e.toString().toLowerCase();
+          if (errorString.contains('socketexception') ||
+              errorString.contains('failed host lookup') ||
+              errorString.contains('no address associated with hostname') ||
+              errorString.contains('network is unreachable') ||
+              errorString.contains('connection refused') ||
+              errorString.contains('connection timed out')) {
+            _errorMessage = 'Tidak ada koneksi internet';
+          } else {
+            _errorMessage = 'Failed to load statistics: $e';
+          }
         });
       }
     }
@@ -301,6 +312,24 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
     } catch (e) {
       debugPrint('!!! ERROR loading recent activities: $e');
       if (!mounted) return;
+      
+      // Check if it's a network/connection error
+      final errorString = e.toString().toLowerCase();
+      final isNetworkError = errorString.contains('socketexception') ||
+          errorString.contains('failed host lookup') ||
+          errorString.contains('no address associated with hostname') ||
+          errorString.contains('network is unreachable') ||
+          errorString.contains('connection refused') ||
+          errorString.contains('connection timed out');
+      
+      setState(() {
+        _isLoadingActivities = false;
+        if (isNetworkError) {
+          _errorMessage ??= 'Tidak ada koneksi internet';
+        } else {
+          _errorMessage ??= 'Failed to load recent activities: $e';
+        }
+      });
       setState(() {
         _isLoadingActivities = false;
         _recentActivities = [];

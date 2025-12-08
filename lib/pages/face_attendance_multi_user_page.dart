@@ -11,11 +11,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../services/biometric_service.dart';
 import '../services/face_recognition_tflite_service.dart';
-import '../services/offline_database_service.dart';
-import '../services/attendance_sync_service.dart';
+import '../services/attendance_service.dart';
 import '../helpers/sound_helper.dart';
+import '../helpers/timezone_helper.dart';
 import '../widgets/mode_confirmation_dialog.dart';
-import '../models/offline_attendance.dart';
+import '../services/supabase_storage_service.dart';
 import 'manual_check_page.dart';
 
 class FaceAttendanceMultiUserPage extends StatefulWidget {
@@ -42,8 +42,8 @@ class _FaceAttendanceMultiUserPageState
   CameraController? _cameraController;
   final FaceRecognitionTFLiteService _faceService = FaceRecognitionTFLiteService();
   final BiometricService _biometricService = BiometricService();
-  final OfflineDatabaseService _offlineDb = OfflineDatabaseService();
-  final AttendanceSyncService _syncService = AttendanceSyncService();
+  final AttendanceService _attendanceService = AttendanceService();
+  final SupabaseStorageService _storageService = SupabaseStorageService();
   final SupabaseClient _supabase = Supabase.instance.client;
 
   bool _isCameraInitialized = false;
@@ -73,7 +73,6 @@ class _FaceAttendanceMultiUserPageState
   bool _hasFacesInView = false;
 
   bool _isOnline = true;
-  int _pendingSyncCount = 0;
 
   @override
   void initState() {
@@ -85,8 +84,6 @@ class _FaceAttendanceMultiUserPageState
     _initializeCamera();
     _getCurrentLocation();
     _checkConnectivity();
-    _loadPendingSyncCount();
-    _syncService.startAutoSync();
   }
 
   Future<void> _checkConnectivity() async {
@@ -95,24 +92,15 @@ class _FaceAttendanceMultiUserPageState
       _isOnline = result != ConnectivityResult.none;
     });
 
-    Connectivity().onConnectivityChanged.listen((results) {
-      if (mounted) {
-        setState(() {
-          _isOnline = results != ConnectivityResult.none;
-        });
-        if (_isOnline) _loadPendingSyncCount();
-      }
-    });
+      Connectivity().onConnectivityChanged.listen((results) {
+        if (mounted) {
+          setState(() {
+            _isOnline = results != ConnectivityResult.none;
+          });
+        }
+      });
   }
 
-  Future<void> _loadPendingSyncCount() async {
-    final count = await _offlineDb.getUnsyncedCount();
-    if (mounted) {
-      setState(() {
-        _pendingSyncCount = count;
-      });
-    }
-  }
 
   void _showMessage(String message, MessageType type, {int seconds = 3}) {
     _messageTimer?.cancel();
@@ -469,23 +457,71 @@ class _FaceAttendanceMultiUserPageState
           debugPrint('Failed to save photo locally: $e');
         }
 
-        // Save to offline database
-        final offlineAttendance = OfflineAttendance(
-          cardNumber: 'FACE_$memberId',
-          faceEmbedding: jsonEncode(template),
-          eventType: attendanceType,
-          method: 'face_recognition_kiosk',
-          timestamp: DateTime.now().toUtc().toIso8601String(),
-          photoPath: localPhotoPath,
-          latitude: _currentPosition?.latitude,
-          longitude: _currentPosition?.longitude,
-          workTimeMode: workTimeMode,
-          organizationMemberId: memberId,
-          userName: userName,
-        );
+        // Direct sync to server (no offline database for face recognition)
+        debugPrint('🔄 Syncing face recognition attendance directly to server for: $userName (ID: $memberId)');
         
-        await _offlineDb.insertAttendance(offlineAttendance);
-        await _loadPendingSyncCount();
+        // Upload photo first
+        String photoUrl = '';
+        if (localPhotoPath != null && localPhotoPath.isNotEmpty) {
+          try {
+            final photoFile = File(localPhotoPath);
+            if (await photoFile.exists()) {
+              debugPrint('📸 Uploading photo for member $memberId...');
+              photoUrl = await _storageService.uploadAttendancePhoto(
+                photoFile,
+                memberId,
+                attendanceType,
+              );
+              debugPrint('✅ Photo uploaded successfully: $photoUrl');
+            }
+          } catch (e) {
+            debugPrint('⚠️ Failed to upload photo (continuing without photo): $e');
+            // Continue without photo
+          }
+        }
+        
+        // Prepare location data
+        Map<String, dynamic>? locationData;
+        if (_currentPosition?.latitude != null && _currentPosition?.longitude != null) {
+          locationData = {
+            'latitude': _currentPosition!.latitude,
+            'longitude': _currentPosition!.longitude,
+          };
+        }
+        
+        // Sync directly to Supabase
+        try {
+          if (attendanceType == 'check_in') {
+            await _attendanceService.checkIn(
+              organizationMemberId: memberId,
+              photoUrl: photoUrl,
+              method: 'face_recognition_kiosk',
+              organizationTimezone: _organizationTimezone,
+              location: locationData,
+              rawData: {
+                'face_recognition': true,
+                'work_time_mode': workTimeMode,
+              },
+            );
+            debugPrint('✅ Successfully synced check_in for member $memberId');
+          } else {
+            await _attendanceService.checkOut(
+              organizationMemberId: memberId,
+              photoUrl: photoUrl,
+              method: 'face_recognition_kiosk',
+              organizationTimezone: _organizationTimezone,
+              location: locationData,
+              rawData: {
+                'face_recognition': true,
+                'work_time_mode': workTimeMode,
+              },
+            );
+            debugPrint('✅ Successfully synced check_out for member $memberId');
+          }
+        } catch (e) {
+          debugPrint('❌ Failed to sync face recognition attendance: $e');
+          rethrow;
+        }
 
         await _biometricService.updateLastUsed(user['biometric_id']);
 
@@ -606,43 +642,6 @@ class _FaceAttendanceMultiUserPageState
     if (confirmed != true) return;
   }
 
-  Future<void> _showSyncDialog() async {
-    final stats = await _syncService.getSyncStats();
-    
-    if (!mounted) return;
-    
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Sinkronisasi Data'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Total pending: ${stats['pending'] ?? 0}'),
-            Text('Berhasil: ${stats['synced'] ?? 0}'),
-            Text('Gagal: ${stats['failed'] ?? 0}'),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () async {
-                Navigator.pop(context);
-                await _syncService.syncAllPendingAttendances();
-                await _loadPendingSyncCount();
-              },
-              child: const Text('Mulai Sinkronisasi'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Tutup'),
-          ),
-        ],
-      ),
-    );
-  }
 
   @override
   void dispose() {
@@ -651,7 +650,6 @@ class _FaceAttendanceMultiUserPageState
     _scheduleCheckTimer?.cancel();
     _cameraController?.dispose();
     _faceService.dispose();
-    _syncService.stopAutoSync();
     
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setPreferredOrientations([
@@ -873,30 +871,26 @@ class _FaceAttendanceMultiUserPageState
                               _buildModeToggle(),
                             ],
                           ),
-                          if (!_isOnline || _pendingSyncCount > 0) ...[
+                          if (!_isOnline) ...[
                             const SizedBox(height: 8),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                               decoration: BoxDecoration(
-                                color: _isOnline 
-                                    ? Colors.orange.withValues(alpha: 0.8)
-                                    : Colors.red.withValues(alpha: 0.8),
+                                color: Colors.red.withValues(alpha: 0.8),
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              child: Row(
+                              child: const Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Icon(
-                                    _isOnline ? Icons.cloud_queue : Icons.cloud_off,
+                                    Icons.cloud_off,
                                     size: 14,
                                     color: Colors.white,
                                   ),
-                                  const SizedBox(width: 6),
+                                  SizedBox(width: 6),
                                   Text(
-                                    _isOnline 
-                                        ? '$_pendingSyncCount pending'
-                                        : 'Offline',
-                                    style: const TextStyle(
+                                    'Offline',
+                                    style: TextStyle(
                                       color: Colors.white,
                                       fontSize: 11,
                                       fontWeight: FontWeight.w600,
@@ -1252,24 +1246,6 @@ class _FaceAttendanceMultiUserPageState
             ],
           ),
         ),
-        const PopupMenuDivider(),
-        PopupMenuItem<String>(
-          value: 'sign_data',
-          child: Row(
-            children: [
-              Icon(
-                _pendingSyncCount > 0 ? Icons.sync_problem : Icons.sync,
-                color: _pendingSyncCount > 0 ? Colors.orange : const Color(0xFF9333EA),
-                size: 18,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Sinkronisasi data${_pendingSyncCount > 0 ? ' ($_pendingSyncCount)' : ''}',
-                style: const TextStyle(fontSize: 14),
-              ),
-            ],
-          ),
-        ),
       ],
     ).then((value) {
       if (value != null) _handleMenuSelection(value);
@@ -1307,9 +1283,6 @@ class _FaceAttendanceMultiUserPageState
             duration: Duration(seconds: 2),
           ),
         );
-        break;
-      case 'sign_data':
-        _showSyncDialog();
         break;
     }
   }

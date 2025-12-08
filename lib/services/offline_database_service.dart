@@ -126,21 +126,29 @@ class OfflineDatabaseService {
   Future<int> insertAttendance(OfflineAttendance attendance) async {
     try {
       final db = await database;
-      return await db.insert('offline_attendances', attendance.toMap());
+      final map = attendance.toMap();
+      debugPrint('📝 Inserting attendance: method=${attendance.method}, memberId=${attendance.organizationMemberId}, eventType=${attendance.eventType}');
+      final id = await db.insert('offline_attendances', map);
+      debugPrint('✅ Attendance inserted with ID: $id');
+      return id;
     } catch (e) {
-      debugPrint('Error inserting offline attendance: $e');
+      debugPrint('❌ Error inserting offline attendance: $e');
+      debugPrint('   Method: ${attendance.method}');
+      debugPrint('   Member ID: ${attendance.organizationMemberId}');
+      debugPrint('   Event Type: ${attendance.eventType}');
       rethrow;
     }
   }
 
-  // Get all unsynced attendances
+  // Get all unsynced attendances (only RFID, skip face recognition)
   Future<List<OfflineAttendance>> getUnsyncedAttendances() async {
     try {
       final db = await database;
+      // Only get RFID records, skip face_recognition_kiosk since it syncs directly now
       final results = await db.query(
         'offline_attendances',
-        where: 'is_synced = ?',
-        whereArgs: [0],
+        where: 'is_synced = ? AND method = ?',
+        whereArgs: [0, 'rfid_card_mobile'],
         orderBy: 'created_at ASC',
       );
       return results.map((map) => OfflineAttendance.fromMap(map)).toList();
@@ -189,27 +197,68 @@ class OfflineDatabaseService {
     }
   }
 
-  // Delete synced attendances
+  // Delete synced attendances (deprecated - use deleteSuccessfullySyncedAttendances instead)
   Future<int> deleteSyncedAttendances() async {
+    return await deleteSuccessfullySyncedAttendances();
+  }
+
+  // Delete only successfully synced attendances (no errors)
+  Future<int> deleteSuccessfullySyncedAttendances() async {
     try {
       final db = await database;
+      // Only delete records that are synced AND have no sync error
+      // This ensures failed records are kept for retry
       return await db.delete(
         'offline_attendances',
-        where: 'is_synced = ?',
-        whereArgs: [1],
+        where: 'is_synced = ? AND (sync_error IS NULL OR sync_error = ?)',
+        whereArgs: [1, ''],
       );
     } catch (e) {
-      debugPrint('Error deleting synced attendances: $e');
+      debugPrint('Error deleting successfully synced attendances: $e');
       return 0;
     }
   }
 
-  // Get count of unsynced records
+  // Delete a specific attendance record by ID
+  Future<int> deleteAttendance(int id) async {
+    try {
+      final db = await database;
+      return await db.delete(
+        'offline_attendances',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    } catch (e) {
+      debugPrint('Error deleting attendance: $e');
+      return 0;
+    }
+  }
+
+  // Delete duplicate records (marked as synced with duplicate error)
+  Future<int> deleteDuplicateRecords() async {
+    try {
+      final db = await database;
+      // Delete records that are marked as synced but have duplicate error
+      // These are records that were detected as duplicate during sync
+      return await db.delete(
+        'offline_attendances',
+        where: 'is_synced = ? AND sync_error LIKE ?',
+        whereArgs: [1, '%Duplicate%'],
+      );
+    } catch (e) {
+      debugPrint('Error deleting duplicate records: $e');
+      return 0;
+    }
+  }
+
+  // Get count of unsynced records (only RFID, skip face recognition)
   Future<int> getUnsyncedCount() async {
     try {
       final db = await database;
+      // Only count RFID records, skip face_recognition_kiosk since it syncs directly now
       final result = await db.rawQuery(
-        'SELECT COUNT(*) as count FROM offline_attendances WHERE is_synced = 0',
+        'SELECT COUNT(*) as count FROM offline_attendances WHERE is_synced = 0 AND method = ?',
+        ['rfid_card_mobile'],
       );
       return Sqflite.firstIntValue(result) ?? 0;
     } catch (e) {
@@ -306,14 +355,33 @@ class OfflineDatabaseService {
   Future<Map<String, dynamic>?> findMemberByCardInCache(String cardNumber, int organizationId) async {
     try {
       final db = await database;
-      final results = await db.query(
+      // Normalize card number for search
+      final normalizedCardNumber = cardNumber.trim();
+      
+      // Try exact match first
+      var results = await db.query(
         'cached_members',
         where: 'card_number = ? AND organization_id = ? AND is_active = 1',
-        whereArgs: [cardNumber, organizationId],
+        whereArgs: [normalizedCardNumber, organizationId],
       );
 
+      // If not found, try case-insensitive search
       if (results.isEmpty) {
-        debugPrint('❌ Card $cardNumber not found in cache');
+        debugPrint('🔍 Trying case-insensitive search in cache...');
+        final allCached = await db.query(
+          'cached_members',
+          where: 'organization_id = ? AND is_active = 1',
+          whereArgs: [organizationId],
+        );
+        
+        results = allCached.where((member) {
+          final cachedCard = (member['card_number'] as String?)?.trim() ?? '';
+          return cachedCard.toLowerCase() == normalizedCardNumber.toLowerCase();
+        }).toList();
+      }
+
+      if (results.isEmpty) {
+        debugPrint('❌ Card "$normalizedCardNumber" not found in cache');
         return null;
       }
 

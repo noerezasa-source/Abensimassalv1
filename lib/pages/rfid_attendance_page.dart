@@ -365,7 +365,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
           organization_members!inner(
             id, organization_id, user_id, department_id,
             user_profiles (display_name, first_name, last_name, profile_photo_url),
-            departments (id, name)
+            departments!organization_members_department_id_fkey (id, name)
           )
         ''')
           .eq('organization_members.organization_id', orgId)
@@ -436,41 +436,126 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
 
   Future<Map<String, dynamic>?> _findMemberByCard(String cardNumber) async {
     final orgId = _organizationId;
-    if (orgId == null) return null;
+    if (orgId == null) {
+      debugPrint('❌ Organization ID is null');
+      return null;
+    }
+
+    // Normalize card number (trim whitespace)
+    final normalizedCardNumber = cardNumber.trim();
+    if (normalizedCardNumber.isEmpty) {
+      debugPrint('❌ Card number is empty after normalization');
+      return null;
+    }
 
     try {
       Map<String, dynamic>? cardData;
       
-      debugPrint('🔍 Searching for card: $cardNumber (Online: $_isOnline)');
+      debugPrint('🔍 Searching for card: "$normalizedCardNumber" (Org ID: $orgId, Online: $_isOnline)');
       
       // Try online first if connected
       if (_isOnline) {
         try {
-          cardData = await _supabase
+          // First, try to find the card directly
+          final cardResult = await _supabase
               .from('rfid_cards')
-              .select('''
-              id, card_number, organization_member_id,
-              organization_members!inner(
-                id, organization_id, user_id, department_id,
-                user_profiles (display_name, first_name, last_name, profile_photo_url),
-                departments (id, name)
-              )
-            ''')
-              .eq('card_number', cardNumber)
-              .eq('organization_members.organization_id', orgId)
+              .select('id, card_number, organization_member_id, is_active')
+              .eq('card_number', normalizedCardNumber)
               .eq('is_active', true)
               .maybeSingle();
           
-          if (cardData != null) {
-            debugPrint('✅ Found card online, caching data...');
-            await _offlineDb.cacheMemberData(cardData);
+          debugPrint('📋 Card query result: ${cardResult != null ? "Found" : "Not found"}');
+          
+          if (cardResult != null) {
+            final memberId = cardResult['organization_member_id'] as int?;
+            debugPrint('👤 Found member ID: $memberId');
             
-            final memberInfo = cardData['organization_members'] as Map<String, dynamic>?;
-            final userName = _composeMemberName(memberInfo);
-            debugPrint('👤 Member name: $userName');
+            if (memberId != null) {
+              // Now fetch the full member data with organization check
+              final memberData = await _supabase
+                  .from('organization_members')
+                  .select('''
+                    id, organization_id, user_id, department_id,
+                    user_profiles (display_name, first_name, last_name, profile_photo_url),
+                    departments!organization_members_department_id_fkey (id, name)
+                  ''')
+                  .eq('id', memberId)
+                  .eq('organization_id', orgId)
+                  .eq('is_active', true)
+                  .maybeSingle();
+              
+              debugPrint('👥 Member data query result: ${memberData != null ? "Found" : "Not found"}');
+              
+              if (memberData != null) {
+                // Construct cardData in the expected format
+                cardData = {
+                  'id': cardResult['id'],
+                  'card_number': cardResult['card_number'],
+                  'organization_member_id': memberId,
+                  'organization_members': memberData,
+                };
+                
+                debugPrint('✅ Found card online, caching data...');
+                await _offlineDb.cacheMemberData(cardData);
+                
+                final userName = _composeMemberName(memberData);
+                debugPrint('👤 Member name: $userName');
+              } else {
+                debugPrint('⚠️ Member $memberId not found or not in organization $orgId or inactive');
+              }
+            } else {
+              debugPrint('⚠️ Card found but organization_member_id is null');
+            }
+          } else {
+            debugPrint('⚠️ Card "$normalizedCardNumber" not found in rfid_cards table or inactive');
+            
+            // Try case-insensitive search as fallback
+            debugPrint('🔍 Trying case-insensitive search...');
+            final allCards = await _supabase
+                .from('rfid_cards')
+                .select('id, card_number, organization_member_id, is_active')
+                .eq('is_active', true)
+                .limit(1000); // Reasonable limit
+            
+            final matchingCard = allCards.firstWhere(
+              (card) => (card['card_number'] as String?)?.trim().toLowerCase() == normalizedCardNumber.toLowerCase(),
+              orElse: () => {},
+            );
+            
+            if (matchingCard.isNotEmpty) {
+              debugPrint('✅ Found card with case-insensitive match: ${matchingCard['card_number']}');
+              final memberId = matchingCard['organization_member_id'] as int?;
+              
+              if (memberId != null) {
+                final memberData = await _supabase
+                    .from('organization_members')
+                    .select('''
+                      id, organization_id, user_id, department_id,
+                      user_profiles (display_name, first_name, last_name, profile_photo_url),
+                      departments!organization_members_department_id_fkey (id, name)
+                    ''')
+                    .eq('id', memberId)
+                    .eq('organization_id', orgId)
+                    .eq('is_active', true)
+                    .maybeSingle();
+                
+                if (memberData != null) {
+                  cardData = {
+                    'id': matchingCard['id'],
+                    'card_number': matchingCard['card_number'],
+                    'organization_member_id': memberId,
+                    'organization_members': memberData,
+                  };
+                  
+                  debugPrint('✅ Found card with case-insensitive match, caching...');
+                  await _offlineDb.cacheMemberData(cardData);
+                }
+              }
+            }
           }
-        } catch (e) {
+        } catch (e, stackTrace) {
           debugPrint('❌ Error finding card online: $e');
+          debugPrint('Stack trace: $stackTrace');
           // Fall back to cache if online fails
         }
       }
@@ -478,7 +563,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
       // If online failed or offline, try cache
       if (cardData == null) {
         debugPrint('🔍 Searching in offline cache...');
-        cardData = await _offlineDb.findMemberByCardInCache(cardNumber, orgId);
+        cardData = await _offlineDb.findMemberByCardInCache(normalizedCardNumber, orgId);
         if (cardData != null) {
           final memberInfo = cardData['organization_members'] as Map<String, dynamic>?;
           final userName = _composeMemberName(memberInfo);
@@ -488,18 +573,26 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         }
       }
       
+      if (cardData == null) {
+        debugPrint('❌ Card "$normalizedCardNumber" not found anywhere (online or cache)');
+      }
+      
       return cardData;
-    } catch (e) {
+    } catch (e, stackTrace) {
       debugPrint('❌ Error finding card: $e');
+      debugPrint('Stack trace: $stackTrace');
       return null;
     }
   }
 
   Future<void> _handleCardScan() async {
     final cardNumber = _cardController.text.trim();
-    if (cardNumber.isEmpty) return;
+    if (cardNumber.isEmpty) {
+      debugPrint('⚠️ Empty card number');
+      return;
+    }
 
-    debugPrint('📱 Card scanned: $cardNumber');
+    debugPrint('📱 Card scanned: "$cardNumber"');
 
     try {
       final cardData = await _findMemberByCard(cardNumber);

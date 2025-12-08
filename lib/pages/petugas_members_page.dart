@@ -1377,6 +1377,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
     final color = isTopPerformer ? Colors.green : Colors.red;
     
     return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       leading: CircleAvatar(
         backgroundColor: color.withOpacity(0.1),
         child: Text(
@@ -1387,9 +1388,13 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
           ),
         ),
       ),
-      title: Text(_getMemberName(member)),
+      title: Text(
+        _getMemberName(member),
+        overflow: TextOverflow.ellipsis,
+      ),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Text(
             'Productivity Score: ${_formatPercentage(performance['productivity_score'])}',
@@ -1400,14 +1405,15 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
             ),
           ),
           const SizedBox(height: 4),
-          Row(
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
             children: [
               _buildMiniBadge(
                 'Attendance',
                 _formatPercentage(performance['attendance_rate']),
                 performance['attendance_rate'] > 0.8 ? Colors.green : Colors.orange,
               ),
-              const SizedBox(width: 8),
               _buildMiniBadge(
                 'Punctuality',
                 _formatPercentage(performance['punctuality_rate']),
@@ -1420,24 +1426,28 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
       trailing: Icon(
         isTopPerformer ? Icons.emoji_events : Icons.warning,
         color: color,
+        size: 20,
       ),
+      isThreeLine: false,
     );
   }
 
   Widget _buildMiniBadge(String label, String value, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
       decoration: BoxDecoration(
         color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
         '$label: $value',
         style: TextStyle(
-          fontSize: 10,
+          fontSize: 9,
           color: color,
           fontWeight: FontWeight.w600,
         ),
+        overflow: TextOverflow.ellipsis,
+        maxLines: 1,
       ),
     );
   }
