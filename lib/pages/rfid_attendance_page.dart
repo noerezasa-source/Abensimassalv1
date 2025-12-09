@@ -427,16 +427,21 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
   Future<void> _handleModeChange(String newMode) async {
     if (_attendanceMode == newMode) return;
 
-    final confirmed = await ModeConfirmationDialog.show(
+    await ModeConfirmationDialog.show(
       context: context,
       currentMode: _attendanceMode,
       newMode: newMode,
       onConfirm: () {
         setState(() => _attendanceMode = newMode);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Mode diubah ke ${newMode == 'check_in' ? 'Check In' : 'Check Out'}'),
+            backgroundColor: const Color(0xFF9333EA),
+            duration: const Duration(seconds: 2),
+          ),
+        );
       },
     );
-
-    if (confirmed != true) return;
   }
 
   Future<Map<String, dynamic>?> _findMemberByCard(String cardNumber) async {
@@ -590,6 +595,159 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
     }
   }
 
+  void _showDuplicateAlert(String name, String department, String mode) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black.withOpacity(0.5),
+      builder: (BuildContext context) {
+        // Auto dismiss after 3 seconds
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted && Navigator.of(context).canPop()) {
+            Navigator.of(context).pop();
+          }
+        });
+
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.2),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Warning Icon
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.warning_rounded,
+                    color: Colors.orange.shade600,
+                    size: 48,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                
+                // Title
+                const Text(
+                  'Sudah Melakukan Absensi',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                
+                // Divider
+                Container(
+                  height: 1,
+                  color: Colors.grey.shade200,
+                ),
+                const SizedBox(height: 16),
+                
+                // Member Info
+                _buildInfoRow(Icons.person, 'Nama', name),
+                const SizedBox(height: 12),
+                _buildInfoRow(Icons.business, 'Departemen', department),
+                const SizedBox(height: 12),
+                _buildInfoRow(
+                  mode == 'Check In' ? Icons.login : Icons.logout,
+                  'Mode',
+                  mode,
+                  valueColor: mode == 'Check In' ? Colors.green : Colors.red,
+                ),
+                
+                const SizedBox(height: 20),
+                
+                // Auto close indicator
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.timer_outlined,
+                      size: 16,
+                      color: Colors.grey.shade600,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Tutup otomatis dalam 3 detik',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildInfoRow(IconData icon, String label, String value, {Color? valueColor}) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF9333EA).withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            icon,
+            size: 20,
+            color: const Color(0xFF9333EA),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade600,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: valueColor ?? Colors.black87,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   Future<void> _handleCardScan() async {
     final cardNumber = _cardController.text.trim();
     if (cardNumber.isEmpty) {
@@ -688,13 +846,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
           final deptName = deptMap['name'] as String? ?? '-';
           final mode = action == 'check_in' ? 'Check In' : 'Check Out';
 
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Duplikat: $name • $deptName • Mode $mode'),
-              duration: const Duration(seconds: 3),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
+          _showDuplicateAlert(name, deptName, mode);
         }
         return;
       }
@@ -826,7 +978,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
   String _formatDate(DateTime? time) {
     if (time == null) return '-';
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return '${time.day.toString().padLeft(2, '0')} ${months[time.month - 1]} ${time.year}';
+    return '${time.day} ${months[time.month - 1]} ${time.year}';
   }
 
   @override
@@ -922,111 +1074,84 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
     );
 
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.15),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-            spreadRadius: 2,
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
+            spreadRadius: 1,
           ),
         ],
       ),
-      child: Column(
+      child: Row(
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _formatDateTime(orgTime),
-                      style: const TextStyle(
-                        fontSize: 42,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF9333EA),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _formatDate(orgTime),
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                  ],
+          // Clock Section
+          Expanded(
+            flex: 3,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _formatDateTime(orgTime),
+                  style: const TextStyle(
+                    fontSize: 42,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF9333EA),
+                  ),
                 ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    _getWorkTimeMode() == 'break_time' ? 'Break time' : 'Work time',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.grey.shade600,
-                      fontWeight: FontWeight.w500,
-                    ),
+                const SizedBox(height: 2),
+                Text(
+                  _formatDate(orgTime),
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.grey.shade600,
                   ),
-                  const SizedBox(height: 6),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _buildToggleButton('In', 'check_in'),
-                        _buildToggleButton('Out', 'check_out'),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          if (!_isOnline || _pendingSyncCount > 0) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: _isOnline ? Colors.orange.shade50 : Colors.red.shade50,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: _isOnline ? Colors.orange.shade200 : Colors.red.shade200,
                 ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    _isOnline ? Icons.cloud_queue : Icons.cloud_off,
-                    size: 16,
-                    color: _isOnline ? Colors.orange : Colors.red,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _isOnline 
-                          ? 'Mode Online - $_pendingSyncCount data pending'
-                          : 'Mode Offline - Data akan tersinkron otomatis',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: _isOnline ? Colors.orange.shade900 : Colors.red.shade900,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+              ],
             ),
-          ],
+          ),
+          const SizedBox(width: 20),
+          // Mode Section
+          Expanded(
+            flex: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _getWorkTimeMode() == 'break_time' ? 'Waktu Istirahat' : 'Waktu Kerja',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    color: Color(0xFF9333EA),
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _buildAttendanceModeToggle(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAttendanceModeToggle() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.grey.shade200,
+        borderRadius: BorderRadius.circular(25),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildToggleButton('In', 'check_in'),
+          _buildToggleButton('Out', 'check_out'),
         ],
       ),
     );
@@ -1091,7 +1216,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: Colors.black.withOpacity(0.05),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -1187,60 +1312,10 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
   }
 
   void _showMenu(BuildContext context) {
-    final currentMode = _getWorkTimeMode();
-    final isAutoMode = _workTimeMode == null;
-    
     showMenu<String>(
       context: context,
       position: const RelativeRect.fromLTRB(80, 50, 0, 0),
       items: <PopupMenuEntry<String>>[
-        PopupMenuItem<String>(
-          value: 'work_time',
-          child: Row(
-            children: [
-              Icon(
-                currentMode == 'work_time' && !isAutoMode 
-                    ? Icons.radio_button_checked 
-                    : Icons.radio_button_unchecked,
-                color: const Color(0xFF9333EA),
-                size: 18,
-              ),
-              const SizedBox(width: 8),
-              const Text('Work time', style: TextStyle(fontSize: 14)),
-            ],
-          ),
-        ),
-        PopupMenuItem<String>(
-          value: 'break_time',
-          child: Row(
-            children: [
-              Icon(
-                currentMode == 'break_time' && !isAutoMode 
-                    ? Icons.radio_button_checked 
-                    : Icons.radio_button_unchecked,
-                color: const Color(0xFF9333EA),
-                size: 18,
-              ),
-              const SizedBox(width: 8),
-              const Text('Break time', style: TextStyle(fontSize: 14)),
-            ],
-          ),
-        ),
-        PopupMenuItem<String>(
-          value: 'auto',
-          child: Row(
-            children: [
-              Icon(
-                isAutoMode ? Icons.radio_button_checked : Icons.radio_button_unchecked,
-                color: const Color(0xFF9333EA),
-                size: 18,
-              ),
-              const SizedBox(width: 8),
-              const Text('Auto (berdasarkan jadwal)', style: TextStyle(fontSize: 14)),
-            ],
-          ),
-        ),
-        const PopupMenuDivider(),
         PopupMenuItem<String>(
           value: 'sign_data',
           child: Row(
@@ -1266,36 +1341,6 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
 
   void _handleMenuSelection(String value) {
     switch (value) {
-      case 'work_time':
-        setState(() => _workTimeMode = 'work_time');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Mode diubah ke Work time'),
-            backgroundColor: Color(0xFF9333EA),
-            duration: Duration(seconds: 2),
-          ),
-        );
-        break;
-      case 'break_time':
-        setState(() => _workTimeMode = 'break_time');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Mode diubah ke Break time'),
-            backgroundColor: Color(0xFF9333EA),
-            duration: Duration(seconds: 2),
-          ),
-        );
-        break;
-      case 'auto':
-        setState(() => _workTimeMode = null);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Mode diubah ke Auto (berdasarkan jadwal)'),
-            backgroundColor: Color(0xFF9333EA),
-            duration: Duration(seconds: 2),
-          ),
-        );
-        break;
       case 'sign_data':
         _showSyncDialog();
         break;

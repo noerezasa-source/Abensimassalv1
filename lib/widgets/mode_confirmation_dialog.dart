@@ -56,17 +56,6 @@ class ModeConfirmationDialog extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             
-            // Title
-            Text(
-              'Konfirmasi Mode',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey.shade800,
-              ),
-            ),
-            const SizedBox(height: 12),
-            
             // Message
             RichText(
               textAlign: TextAlign.center,
@@ -86,56 +75,87 @@ class ModeConfirmationDialog extends StatelessWidget {
                       fontSize: 18,
                     ),
                   ),
-                  const TextSpan(text: '\n\nLanjutkan?'),
+                  const TextSpan(text: '\n\n'),
+                  const TextSpan(
+                    text: 'Pilih mode waktu:',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
                 ],
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
             
-            // Buttons
+            // Mode Selection Buttons
             Row(
               children: [
                 Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.of(context).pop(false),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.of(context).pop(true);
+                      onConfirm();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
                         borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.blue.shade200),
                       ),
-                      side: BorderSide(color: Colors.grey.shade400),
-                    ),
-                    child: Text(
-                      'Batal',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.grey.shade700,
+                      child: Column(
+                        children: [
+                          Icon(
+                            Icons.work,
+                            color: Colors.blue.shade600,
+                            size: 24,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Waktu Kerja',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue.shade700,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: ElevatedButton(
-                    onPressed: () {
+                  child: GestureDetector(
+                    onTap: () {
                       Navigator.of(context).pop(true);
                       onConfirm();
                     },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: color,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade50,
                         borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.orange.shade200),
                       ),
-                      elevation: 2,
-                    ),
-                    child: const Text(
-                      'Ya, Lanjutkan',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
+                      child: Column(
+                        children: [
+                          Icon(
+                            Icons.free_breakfast,
+                            color: Colors.orange.shade600,
+                            size: 24,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Waktu Istirahat',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.orange.shade700,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),

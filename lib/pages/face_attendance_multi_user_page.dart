@@ -630,16 +630,21 @@ class _FaceAttendanceMultiUserPageState
   Future<void> _handleModeChange(String newMode) async {
     if (_attendanceMode == newMode) return;
 
-    final confirmed = await ModeConfirmationDialog.show(
+    await ModeConfirmationDialog.show(
       context: context,
       currentMode: _attendanceMode,
       newMode: newMode,
       onConfirm: () {
         setState(() => _attendanceMode = newMode);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Mode diubah ke ${newMode == 'check_in' ? 'Check In' : 'Check Out'}'),
+            backgroundColor: const Color(0xFF9333EA),
+            duration: const Duration(seconds: 2),
+          ),
+        );
       },
     );
-
-    if (confirmed != true) return;
   }
 
 
@@ -930,7 +935,7 @@ class _FaceAttendanceMultiUserPageState
               left: 0,
               right: 0,
               child: Container(
-                padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
@@ -1123,15 +1128,15 @@ class _FaceAttendanceMultiUserPageState
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Text(
-                                _getWorkTimeMode() == 'break_time' ? 'Break time' : 'Work time',
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.8),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
+                                _getWorkTimeMode() == 'break_time' ? 'Waktu Istirahat' : 'Waktu Kerja',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
                                 ),
                               ),
                               const SizedBox(width: 12),
-                              _buildModeToggle(),
+                              _buildAttendanceModeToggle(),
                             ],
                           ),
                           if (!_isOnline) ...[
@@ -1200,7 +1205,7 @@ class _FaceAttendanceMultiUserPageState
             // Status Message Overlay
             if (_currentMessage != null)
               Positioned(
-                top: 120,
+                top: 80,
                 left: 0,
                 right: 0,
                 child: AnimatedOpacity(
@@ -1208,14 +1213,14 @@ class _FaceAttendanceMultiUserPageState
                   duration: const Duration(milliseconds: 300),
                   child: Container(
                     margin: const EdgeInsets.symmetric(horizontal: 20),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
                       color: _getMessageColor(),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(8),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withValues(alpha: 0.3),
-                          blurRadius: 8,
+                          blurRadius: 6,
                           offset: const Offset(0, 2),
                         ),
                       ],
@@ -1226,26 +1231,26 @@ class _FaceAttendanceMultiUserPageState
                         if (_messageType == MessageType.processing || 
                             _messageType == MessageType.loading)
                           const SizedBox(
-                            width: 18,
-                            height: 18,
+                            width: 14,
+                            height: 14,
                             child: CircularProgressIndicator(
                               color: Colors.white,
-                              strokeWidth: 2,
+                              strokeWidth: 1.5,
                             ),
                           )
                         else if (_getMessageIcon() != null)
-                          Icon(_getMessageIcon(), color: Colors.white, size: 20),
+                          Icon(_getMessageIcon(), color: Colors.white, size: 16),
                         if (_messageType == MessageType.processing || 
                             _messageType == MessageType.loading || 
                             _getMessageIcon() != null)
-                          const SizedBox(width: 10),
+                          const SizedBox(width: 8),
                         Flexible(
                           child: Text(
                             _currentMessage!,
                             textAlign: TextAlign.center,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 14,
+                              fontSize: 12,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -1262,7 +1267,7 @@ class _FaceAttendanceMultiUserPageState
               left: 0,
               right: 0,
               child: Container(
-                height: screenSize.height * 0.30,
+                height: screenSize.height * 0.25,
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: const BorderRadius.only(
@@ -1281,7 +1286,7 @@ class _FaceAttendanceMultiUserPageState
                   children: [
                     // Table Header
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       decoration: BoxDecoration(
                         color: Colors.grey.shade50,
                         borderRadius: const BorderRadius.only(
@@ -1295,23 +1300,23 @@ class _FaceAttendanceMultiUserPageState
                           const Text(
                             'Data Absensi',
                             style: TextStyle(
-                              fontSize: 16,
+                              fontSize: 14,
                               fontWeight: FontWeight.bold,
                               color: Colors.black87,
                             ),
                           ),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                             decoration: BoxDecoration(
                               color: Colors.blue.shade600,
-                              borderRadius: BorderRadius.circular(8),
+                              borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
                               '$_totalProcessedToday',
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,
-                                fontSize: 12,
+                                fontSize: 10,
                               ),
                             ),
                           ),
@@ -1329,23 +1334,23 @@ class _FaceAttendanceMultiUserPageState
                                   children: [
                                     Icon(
                                       Icons.people_outline,
-                                      size: 48,
+                                      size: 32,
                                       color: Colors.grey.shade400,
                                     ),
-                                    const SizedBox(height: 8),
+                                    const SizedBox(height: 6),
                                     Text(
                                       'Belum ada data absensi',
                                       style: TextStyle(
-                                        fontSize: 14,
+                                        fontSize: 12,
                                         color: Colors.grey.shade600,
                                         fontWeight: FontWeight.w500,
                                       ),
                                     ),
-                                    const SizedBox(height: 4),
+                                    const SizedBox(height: 3),
                                     Text(
                                       'Arahkan wajah ke kamera untuk memulai',
                                       style: TextStyle(
-                                        fontSize: 12,
+                                        fontSize: 10,
                                         color: Colors.grey.shade500,
                                       ),
                                     ),
@@ -1457,12 +1462,30 @@ class _FaceAttendanceMultiUserPageState
     );
   }
 
-  Widget _buildModeToggle() {
+  Widget _buildModeSelector() {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(25),
         border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildAttendanceModeToggle(),
+          const SizedBox(height: 8),
+          _buildWorkTimeModeSelector(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAttendanceModeToggle() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(25),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1470,6 +1493,55 @@ class _FaceAttendanceMultiUserPageState
           _buildToggleButton('In', 'check_in', Colors.green),
           _buildToggleButton('Out', 'check_out', Colors.red),
         ],
+      ),
+    );
+  }
+
+  Widget _buildWorkTimeModeSelector() {
+    final currentMode = _getWorkTimeMode();
+    final isWorkTime = currentMode == 'work_time';
+    
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildWorkTimeButton('Waktu Kerja', 'work_time', isWorkTime),
+        const SizedBox(width: 8),
+        _buildWorkTimeButton('Waktu Istirahat', 'break_time', !isWorkTime),
+      ],
+    );
+  }
+
+  Widget _buildWorkTimeButton(String label, String mode, bool isSelected) {
+    return GestureDetector(
+      onTap: () {
+        setState(() => _workTimeMode = mode);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Mode diubah ke $label'),
+            backgroundColor: const Color(0xFF9333EA),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.transparent : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? Colors.white.withValues(alpha: 0.8) : Colors.white.withValues(alpha: 0.3),
+            width: 1.5,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.7),
+          ),
+        ),
       ),
     );
   }
@@ -1498,97 +1570,6 @@ class _FaceAttendanceMultiUserPageState
   }
 
   void _showMenu(BuildContext context) {
-    final currentMode = _getWorkTimeMode();
-    final isAutoMode = _workTimeMode == null;
-    
-    showMenu<String>(
-      context: context,
-      position: const RelativeRect.fromLTRB(80, 50, 0, 0),
-      items: <PopupMenuEntry<String>>[
-        PopupMenuItem<String>(
-          value: 'work_time',
-          child: Row(
-            children: [
-              Icon(
-                currentMode == 'work_time' && !isAutoMode 
-                    ? Icons.radio_button_checked 
-                    : Icons.radio_button_unchecked,
-                color: const Color(0xFF9333EA),
-                size: 18,
-              ),
-              const SizedBox(width: 8),
-              const Text('Work time', style: TextStyle(fontSize: 14)),
-            ],
-          ),
-        ),
-        PopupMenuItem<String>(
-          value: 'break_time',
-          child: Row(
-            children: [
-              Icon(
-                currentMode == 'break_time' && !isAutoMode 
-                    ? Icons.radio_button_checked 
-                    : Icons.radio_button_unchecked,
-                color: const Color(0xFF9333EA),
-                size: 18,
-              ),
-              const SizedBox(width: 8),
-              const Text('Break time', style: TextStyle(fontSize: 14)),
-            ],
-          ),
-        ),
-        PopupMenuItem<String>(
-          value: 'auto',
-          child: Row(
-            children: [
-              Icon(
-                isAutoMode ? Icons.radio_button_checked : Icons.radio_button_unchecked,
-                color: const Color(0xFF9333EA),
-                size: 18,
-              ),
-              const SizedBox(width: 8),
-              const Text('Auto (berdasarkan jadwal)', style: TextStyle(fontSize: 14)),
-            ],
-          ),
-        ),
-      ],
-    ).then((value) {
-      if (value != null) _handleMenuSelection(value);
-    });
-  }
-
-  void _handleMenuSelection(String value) {
-    switch (value) {
-      case 'work_time':
-        setState(() => _workTimeMode = 'work_time');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Mode diubah ke Work time'),
-            backgroundColor: Color(0xFF9333EA),
-            duration: Duration(seconds: 2),
-          ),
-        );
-        break;
-      case 'break_time':
-        setState(() => _workTimeMode = 'break_time');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Mode diubah ke Break time'),
-            backgroundColor: Color(0xFF9333EA),
-            duration: Duration(seconds: 2),
-          ),
-        );
-        break;
-      case 'auto':
-        setState(() => _workTimeMode = null);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Mode diubah ke Auto (berdasarkan jadwal)'),
-            backgroundColor: Color(0xFF9333EA),
-            duration: Duration(seconds: 2),
-          ),
-        );
-        break;
-    }
+    // Menu is disabled - no options available
   }
 }
