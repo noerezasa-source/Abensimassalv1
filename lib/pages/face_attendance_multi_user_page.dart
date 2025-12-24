@@ -81,6 +81,14 @@ class _FaceAttendanceMultiUserPageState
 
   List<Map<String, dynamic>> _detectedFaces = [];
   bool _hasFacesInView = false;
+  
+  // ✅ NEW: Store face data with user info for better UI
+  final Map<int, Map<String, dynamic>> _faceDataMap = {};
+  int _faceIdCounter = 0;
+  
+  // ✅ NEW: Processing queue to prevent lag
+  final List<Future<void>> _processingQueue = [];
+  bool _isQueueProcessing = false;
 
   bool _isOnline = true;
 
@@ -102,6 +110,11 @@ class _FaceAttendanceMultiUserPageState
     _continuousScanTimer?.cancel();
     _messageTimer?.cancel();
     _scheduleCheckTimer?.cancel();
+    _isProcessing = false;
+    _isQueueProcessing = false;
+    _processingQueue.clear();
+    _faceDataMap.clear();
+    _detectedFaces.clear();
     _cameraController?.dispose();
     _attendanceSyncService.stopAutoSync();
     _faceService.dispose();
@@ -422,12 +435,27 @@ class _FaceAttendanceMultiUserPageState
   }
 
   Future<void> _initializeCamera() async {
+    // ✅ FIXED: Prevent multiple initializations
+    if (_cameraController != null && _cameraController!.value.isInitialized) {
+      debugPrint('⚠️ Camera already initialized, skipping');
+      return;
+    }
+    
     try {
       final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        throw Exception('No cameras available');
+      }
+      
       final frontCamera = cameras.firstWhere(
         (camera) => camera.lensDirection == CameraLensDirection.front,
         orElse: () => cameras.first,
       );
+
+      // ✅ FIXED: Dispose old controller if exists
+      if (_cameraController != null) {
+        await _cameraController!.dispose();
+      }
 
       _cameraController = CameraController(
         frontCamera,
@@ -436,7 +464,12 @@ class _FaceAttendanceMultiUserPageState
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
 
-      await _cameraController!.initialize();
+      await _cameraController!.initialize().timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw TimeoutException('Camera initialization timeout');
+        },
+      );
       
       try {
         await _cameraController!.setFocusMode(FocusMode.auto);
@@ -453,7 +486,10 @@ class _FaceAttendanceMultiUserPageState
     } catch (e) {
       debugPrint('Camera error: $e');
       if (mounted) {
-        _showMessage('Kamera error', MessageType.error, seconds: 5);
+        _showMessage('Kamera error: ${e.toString()}', MessageType.error, seconds: 5);
+        setState(() {
+          _isCameraInitialized = false;
+        });
       }
     }
   }
@@ -479,10 +515,15 @@ class _FaceAttendanceMultiUserPageState
 
   void _startContinuousScan() {
     // ✅ OPTIMIZED: Reduced scan frequency and added debouncing
+    // ✅ FIXED: Prevent camera restart by checking if camera is still initialized
     _continuousScanTimer = Timer.periodic(
-      const Duration(milliseconds: 1500), // Increased from 500ms to 1500ms
+      const Duration(milliseconds: 2000), // Increased to 2000ms for better stability
       (timer) {
-        if (!_isProcessing && _isCameraInitialized) {
+        if (!_isProcessing && 
+            _isCameraInitialized && 
+            _cameraController != null &&
+            _cameraController!.value.isInitialized &&
+            !_isQueueProcessing) {
           _scanForFaces();
         }
       },
@@ -506,9 +547,11 @@ class _FaceAttendanceMultiUserPageState
   }
 
   Future<void> _scanForFaces() async {
+    // ✅ FIXED: Better camera state checking to prevent restarts
     if (_cameraController == null ||
         !_cameraController!.value.isInitialized ||
-        _isProcessing) {
+        _isProcessing ||
+        _isQueueProcessing) {
       return;
     }
 
@@ -517,7 +560,12 @@ class _FaceAttendanceMultiUserPageState
 
     try {
       // ✅ OPTIMIZED: Take picture and detect faces (already async, but add timeout)
-      final image = await _cameraController!.takePicture();
+      final image = await _cameraController!.takePicture().timeout(
+        const Duration(seconds: 3),
+        onTimeout: () {
+          throw TimeoutException('Camera takePicture timeout');
+        },
+      );
       final imageFile = File(image.path);
       
       // ✅ OPTIMIZED: Add timeout to face detection to prevent hanging
@@ -538,6 +586,7 @@ class _FaceAttendanceMultiUserPageState
         if (mounted) {
           setState(() {
             _detectedFaces = [];
+            _faceDataMap.clear();
           });
         }
 
@@ -565,23 +614,52 @@ class _FaceAttendanceMultiUserPageState
       final imageHeight = (await imageSize)?.height ??
           _cameraController?.value.previewSize?.width ?? 1920.0;
 
-      final detectedFacesMap = faces.map((face) {
-        final boundingBox = face.boundingBox;
-        final left = (boundingBox.left / imageWidth).clamp(0.0, 1.0);
-        final top = (boundingBox.top / imageHeight).clamp(0.0, 1.0);
-        final width = (boundingBox.width / imageWidth).clamp(0.0, 1.0);
-        final height = (boundingBox.height / imageHeight).clamp(0.0, 1.0);
+      // ✅ NEW: Create face data map with IDs for better tracking
+      final detectedFacesMap = <Map<String, dynamic>>[];
+      final newFaceDataMap = <int, Map<String, dynamic>>{};
+      
+      for (int i = 0; i < faces.length; i++) {
+        final face = faces[i];
+// Fix for face detection bounding box to cover full face
+// Replace lines 623-627 in face_attendance_multi_user_page.dart with this code:
 
-        return {
+final boundingBox = face.boundingBox;
+        
+// Expand bounding box to cover full face (forehead and chin)
+final expansionFactor = 0.3; // 30% expansion
+final expandedLeft = (boundingBox.left - (boundingBox.width * expansionFactor)).clamp(0.0, imageWidth - 1);
+final expandedTop = (boundingBox.top - (boundingBox.height * expansionFactor * 0.8)).clamp(0.0, imageHeight - 1); // More expansion on top for forehead
+final expandedRight = (boundingBox.right + (boundingBox.width * expansionFactor)).clamp(0.0, imageWidth - 1);
+final expandedBottom = (boundingBox.bottom + (boundingBox.height * expansionFactor * 1.2)).clamp(0.0, imageHeight - 1); // More expansion on bottom for chin
+
+final left = (expandedLeft / imageWidth).clamp(0.0, 1.0);
+final top = (expandedTop / imageHeight).clamp(0.0, 1.0);
+final width = ((expandedRight - expandedLeft) / imageWidth).clamp(0.0, 1.0);
+final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
+
+        
+        final faceId = _faceIdCounter++;
+        detectedFacesMap.add({
+          'id': faceId,
           'left': left,
           'top': top,
           'width': width,
           'height': height,
+          'status': 'detecting', // detecting, processing, matched, unmatched
+          'userName': null,
+          'similarity': null,
+        });
+        
+        newFaceDataMap[faceId] = {
+          'face': face,
+          'imagePath': image.path,
+          'imageFile': imageFile,
+          'faceIndex': i,
         };
-      }).toList();
+      }
 
-      // ✅ OPTIMIZED: Update UI only if mounted and changed
-      if (mounted && _detectedFaces.length != detectedFacesMap.length) {
+      // ✅ OPTIMIZED: Update UI immediately with face boxes
+      if (mounted) {
         setState(() {
           _detectedFaces = detectedFacesMap;
         });
@@ -594,11 +672,13 @@ class _FaceAttendanceMultiUserPageState
       final futures = <Future<void>>[];
       
       for (int i = 0; i < facesToProcess.length; i++) {
+        final faceId = detectedFacesMap[i]['id'] as int;
         futures.add(_processFaceAsync(
           facesToProcess[i],
           image.path,
           imageFile,
           i,
+          faceId,
           processedUsers,
           (valid, cooldown, unmatched) {
             validUsers = valid;
@@ -621,23 +701,44 @@ class _FaceAttendanceMultiUserPageState
       debugPrint('🎯 PROCESSED USERS COUNT: ${processedUsers.length}');
 
       if (processedUsers.isNotEmpty) {
-        // ✅ OPTIMIZED: Process attendance asynchronously to prevent UI freeze
-        _processMultipleAttendances(processedUsers).catchError((e) {
-          debugPrint('Error in attendance processing: $e');
+        // ✅ OPTIMIZED: Process attendance in queue to prevent lag
+        _addToProcessingQueue(() => _processMultipleAttendances(processedUsers));
+        
+        // ✅ NEW: Clear face boxes after a delay to show success
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) {
+            setState(() {
+              _detectedFaces = [];
+              _faceDataMap.clear();
+            });
+          }
         });
       } else {
         if (faces.isNotEmpty) {
-          // Tidak perlu notifikasi karena sudah ada petunjuk di box instruksi
+          // Update face status to unmatched
+          if (mounted) {
+            setState(() {
+              for (var face in _detectedFaces) {
+                if (face['status'] == 'detecting' || face['status'] == 'processing') {
+                  face['status'] = 'unmatched';
+                }
+              }
+            });
+          }
+          
+          // ✅ NEW: Clear unmatched faces after delay
+          Future.delayed(const Duration(seconds: 3), () {
+            if (mounted) {
+              setState(() {
+                _detectedFaces = [];
+                _faceDataMap.clear();
+              });
+            }
+          });
         }
         
         // ✅ OPTIMIZED: Play sound in background
         SystemSound.play(SystemSoundType.alert).catchError((e) {});
-        
-        if (mounted) {
-          setState(() {
-            _detectedFaces = [];
-          });
-        }
       }
 
       // ✅ OPTIMIZED: Delete file in background without blocking
@@ -645,17 +746,46 @@ class _FaceAttendanceMultiUserPageState
 
     } catch (e) {
       debugPrint('ERROR in multi-face scan: $e');
-      _showMessage('Error: ${e.toString()}', MessageType.error, seconds: 3);
+      if (e is TimeoutException) {
+        debugPrint('⚠️ Camera timeout - skipping this frame');
+      } else {
+        _showMessage('Error: ${e.toString()}', MessageType.error, seconds: 3);
+      }
       
       if (mounted) {
         setState(() {
           _detectedFaces = [];
+          _faceDataMap.clear();
         });
       }
     } finally {
       // ✅ OPTIMIZED: Add cooldown after processing to prevent rapid scanning
       _isProcessing = false;
-      await Future.delayed(const Duration(milliseconds: 500)); // Cooldown
+      await Future.delayed(const Duration(milliseconds: 800)); // Increased cooldown
+    }
+  }
+  
+  // ✅ NEW: Processing queue to prevent lag
+  void _addToProcessingQueue(Future<void> Function() task) {
+    _processingQueue.add(task());
+    _processQueue();
+  }
+  
+  Future<void> _processQueue() async {
+    if (_isQueueProcessing || _processingQueue.isEmpty) return;
+    
+    _isQueueProcessing = true;
+    try {
+      while (_processingQueue.isNotEmpty) {
+        final task = _processingQueue.removeAt(0);
+        await task.timeout(const Duration(seconds: 15), onTimeout: () {
+          debugPrint('⚠️ Queue task timeout');
+        });
+        // Small delay between tasks to prevent overload
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
+    } finally {
+      _isQueueProcessing = false;
     }
   }
 
@@ -665,9 +795,22 @@ class _FaceAttendanceMultiUserPageState
     String imagePath,
     File imageFile,
     int faceIndex,
+    int faceId,
     List<Map<String, dynamic>> processedUsers,
     Function(int, int, int) updateCounters,
   ) async {
+    // ✅ NEW: Update face status to processing
+    if (mounted) {
+      setState(() {
+        final faceData = _detectedFaces.firstWhere(
+          (f) => f['id'] == faceId,
+          orElse: () => {},
+        );
+        if (faceData.isNotEmpty) {
+          faceData['status'] = 'processing';
+        }
+      });
+    }
     try {
       final capturedTemplate = await _faceService.buildTemplateFromFace(
         face,
@@ -689,6 +832,18 @@ class _FaceAttendanceMultiUserPageState
       }
 
       if (bestMatch == null) {
+        // ✅ NEW: Update face status to unmatched
+        if (mounted) {
+          setState(() {
+            final faceData = _detectedFaces.firstWhere(
+              (f) => f['id'] == faceId,
+              orElse: () => {},
+            );
+            if (faceData.isNotEmpty) {
+              faceData['status'] = 'unmatched';
+            }
+          });
+        }
         updateCounters(0, 0, 1);
         return;
       }
@@ -700,8 +855,35 @@ class _FaceAttendanceMultiUserPageState
       // ✅ STRICT: Require minimum similarity of 80% to prevent false matches
       if (similarity < 0.80) {
         debugPrint('❌ FACE $faceIndex: Match rejected - similarity ${(similarity * 100).toStringAsFixed(2)}% below 80% threshold');
+        // ✅ NEW: Update face status to unmatched
+        if (mounted) {
+          setState(() {
+            final faceData = _detectedFaces.firstWhere(
+              (f) => f['id'] == faceId,
+              orElse: () => {},
+            );
+            if (faceData.isNotEmpty) {
+              faceData['status'] = 'unmatched';
+            }
+          });
+        }
         updateCounters(0, 0, 1);
         return;
+      }
+      
+      // ✅ NEW: Update face status to matched with user info
+      if (mounted) {
+        setState(() {
+          final faceData = _detectedFaces.firstWhere(
+            (f) => f['id'] == faceId,
+            orElse: () => {},
+          );
+          if (faceData.isNotEmpty) {
+            faceData['status'] = 'matched';
+            faceData['userName'] = userName;
+            faceData['similarity'] = similarity;
+          }
+        });
       }
       
       // ✅ NEW: Check if this face already matched with a different user in this scan
@@ -1070,6 +1252,7 @@ class _FaceAttendanceMultiUserPageState
 
     setState(() {
       _detectedFaces = [];
+      _faceDataMap.clear();
     });
 
     _cleanupOldTimestamps();
@@ -1446,7 +1629,7 @@ class _FaceAttendanceMultiUserPageState
                 child: CircularProgressIndicator(color: Colors.white),
               ),
 
-            // Face Detection Overlays
+            // ✅ IMPROVED: Face Detection Overlays - Pas dengan ukuran wajah dan tampilkan nama
             if (_detectedFaces.isNotEmpty && _cameraController != null)
               ..._detectedFaces.map((face) {
                 final cameraAspectRatio = _cameraController!.value.aspectRatio;
@@ -1465,20 +1648,187 @@ class _FaceAttendanceMultiUserPageState
                 final offsetX = (screenWidth - previewWidth) / 2;
                 final offsetY = (screenHeight - previewHeight) / 2;
                 
+                // ✅ FIXED: Kotak pas dengan ukuran wajah tanpa padding berlebihan
                 final left = offsetX + (face['left'] as num).toDouble() * previewWidth;
                 final top = offsetY + (face['top'] as num).toDouble() * previewHeight;
                 final width = (face['width'] as num).toDouble() * previewWidth;
                 final height = (face['height'] as num).toDouble() * previewHeight;
+                
+                final status = face['status'] as String? ?? 'detecting';
+                final userName = face['userName'] as String?;
+                final similarity = face['similarity'] as double?;
+                
+                // ✅ NEW: Different colors based on status
+                Color borderColor;
+                Color glowColor;
+                IconData? statusIcon;
+                String? statusText;
+                
+                switch (status) {
+                  case 'detecting':
+                    borderColor = Colors.blue;
+                    glowColor = Colors.blue.withOpacity(0.4);
+                    statusIcon = Icons.search;
+                    statusText = 'Mendeteksi...';
+                    break;
+                  case 'processing':
+                    borderColor = Colors.orange;
+                    glowColor = Colors.orange.withOpacity(0.4);
+                    statusIcon = Icons.hourglass_empty;
+                    statusText = 'Memproses...';
+                    break;
+                  case 'matched':
+                    borderColor = Colors.green;
+                    glowColor = Colors.green.withOpacity(0.4);
+                    statusIcon = Icons.check_circle;
+                    // ✅ FIXED: Tampilkan nama user (offline/online sudah ada di userName)
+                    statusText = userName ?? 'Terkonfirmasi';
+                    break;
+                  case 'unmatched':
+                    borderColor = Colors.red;
+                    glowColor = Colors.red.withOpacity(0.3);
+                    statusIcon = Icons.person_off;
+                    statusText = 'Tidak dikenali';
+                    break;
+                  default:
+                    borderColor = Colors.grey;
+                    glowColor = Colors.grey.withOpacity(0.3);
+                    statusIcon = null;
+                    statusText = null;
+                }
 
                 return Positioned(
                   left: left,
                   top: top,
-                  child: Container(
-                    width: width,
-                    height: height,
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.greenAccent, width: 3),
-                      borderRadius: BorderRadius.circular(8),
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0.0, end: 1.0),
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOut,
+                    builder: (context, value, child) {
+                      return Opacity(
+                        opacity: value,
+                        child: Transform.scale(
+                          scale: 0.9 + (0.1 * value),
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        // ✅ NEW: Glow effect (di belakang kotak)
+                        Positioned(
+                          left: -2,
+                          top: -2,
+                          child: Container(
+                            width: width + 4,
+                            height: height + 4,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(8),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: glowColor,
+                                  blurRadius: 12,
+                                  spreadRadius: 1,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        // ✅ IMPROVED: Main border - fully transparent with outline only
+                        Container(
+                          width: width,
+                          height: height,
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                              color: borderColor,
+                              width: 3,
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        // ✅ IMPROVED: Status label dengan nama user di bawah wajah
+                        if (statusText != null)
+                          Positioned(
+                            top: height + 8,
+                            left: -20,
+                            right: -20,
+                            child: Container(
+                              constraints: BoxConstraints(
+                                maxWidth: width + 40,
+                                minWidth: 80,
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: borderColor.withOpacity(0.95),
+                                borderRadius: BorderRadius.circular(10),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.4),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 3),
+                                  ),
+                                ],
+                                border: Border.all(
+                                  color: Colors.white.withOpacity(0.3),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  if (statusIcon != null) ...[
+                                    Icon(
+                                      statusIcon,
+                                      color: Colors.white,
+                                      size: 16,
+                                    ),
+                                    const SizedBox(width: 6),
+                                  ],
+                                  Flexible(
+                                    child: Text(
+                                      statusText,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 0.3,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                                  if (similarity != null && status == 'matched') ...[
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withOpacity(0.25),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        '${(similarity * 100).toStringAsFixed(0)}%',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                 );
