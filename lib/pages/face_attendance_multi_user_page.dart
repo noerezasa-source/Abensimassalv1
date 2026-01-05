@@ -90,6 +90,11 @@ class _FaceAttendanceMultiUserPageState
   final List<Future<void>> _processingQueue = [];
   bool _isQueueProcessing = false;
 
+  // ✅ NEW: Persistent Face Tracking
+  // Map<trackingId, {name, similarity, memberId, timestamp}>
+  final Map<int, Map<String, dynamic>> _persistentFaceTracker = {};
+
+
   bool _isOnline = true;
 
   @override
@@ -517,7 +522,7 @@ class _FaceAttendanceMultiUserPageState
     // ✅ OPTIMIZED: Reduced scan frequency and added debouncing
     // ✅ FIXED: Prevent camera restart by checking if camera is still initialized
     _continuousScanTimer = Timer.periodic(
-      const Duration(milliseconds: 2000), // Increased to 2000ms for better stability
+      const Duration(milliseconds: 800), // ✅ FASTER: 800ms
       (timer) {
         if (!_isProcessing && 
             _isCameraInitialized && 
@@ -583,15 +588,23 @@ class _FaceAttendanceMultiUserPageState
         // ✅ OPTIMIZED: Delete file in background
         imageFile.delete().catchError((e) => debugPrint('Failed to delete: $e'));
         
-        if (mounted) {
-          setState(() {
-            _detectedFaces = [];
-            _faceDataMap.clear();
-          });
+        // Don't clear immediately to prevent flickering if one frame misses
+        if (mounted && _detectedFaces.isNotEmpty) {
+           // Only clear if empty for a while? Or just let it update naturally 
+           // actually, if faces is empty, we SHOULD clear, but maybe the 800ms timer is too slow?
+           // The user says "stay adjusting until person goes out".
+           // If face goes out, faces.isEmpty is true. So clearing IS correct.
+           // The flickering "refresh" likely happens when face IS present but logic resets it.
+           // Since we fixed the 'reusing IDs' above, the face Present case is fixed.
+           // For face absent case:
+           setState(() {
+             _detectedFaces = [];
+             _faceDataMap.clear();
+           });
         }
-
+        
         _hasFacesInView = false;
-        _showMessage('Tidak ada wajah terdeteksi - Silakan posisikan wajah di depan kamera', MessageType.warning, seconds: 3);
+        // _showMessage omitted to be less spammy
         
         _isProcessing = false;
         return;
@@ -623,32 +636,59 @@ class _FaceAttendanceMultiUserPageState
 // Fix for face detection bounding box to cover full face
 // Replace lines 623-627 in face_attendance_multi_user_page.dart with this code:
 
+// Fix for face detection bounding box to cover full face
+// Replace lines 623-627 in face_attendance_multi_user_page.dart with this code:
+
 final boundingBox = face.boundingBox;
         
-// Expand bounding box to cover full face (forehead and chin)
-final expansionFactor = 0.3; // 30% expansion
+// Expand bounding box slightly (reduced from 0.3 to 0.15 for better fit when close)
+final expansionFactor = 0.15; 
 final expandedLeft = (boundingBox.left - (boundingBox.width * expansionFactor)).clamp(0.0, imageWidth - 1);
-final expandedTop = (boundingBox.top - (boundingBox.height * expansionFactor * 0.8)).clamp(0.0, imageHeight - 1); // More expansion on top for forehead
+final expandedTop = (boundingBox.top - (boundingBox.height * expansionFactor * 0.8)).clamp(0.0, imageHeight - 1); 
 final expandedRight = (boundingBox.right + (boundingBox.width * expansionFactor)).clamp(0.0, imageWidth - 1);
-final expandedBottom = (boundingBox.bottom + (boundingBox.height * expansionFactor * 1.2)).clamp(0.0, imageHeight - 1); // More expansion on bottom for chin
+final expandedBottom = (boundingBox.bottom + (boundingBox.height * expansionFactor * 1.2)).clamp(0.0, imageHeight - 1); 
 
 final left = (expandedLeft / imageWidth).clamp(0.0, 1.0);
 final top = (expandedTop / imageHeight).clamp(0.0, 1.0);
 final width = ((expandedRight - expandedLeft) / imageWidth).clamp(0.0, 1.0);
 final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
 
-        
-        final faceId = _faceIdCounter++;
-        detectedFacesMap.add({
+        final trackingId = face.trackingId;
+        Map<String, dynamic>? knownFace;
+
+        // Check persistent tracker for match info
+        if (trackingId != null && _persistentFaceTracker.containsKey(trackingId)) {
+          knownFace = _persistentFaceTracker[trackingId];
+          knownFace!['lastSeen'] = DateTime.now();
+        }
+
+        // Check if we already have this face in the UI list to preserve animation state
+        int existingFaceIndex = -1;
+        if (trackingId != null) {
+          existingFaceIndex = _detectedFaces.indexWhere((f) => f['trackingId'] == trackingId);
+        }
+
+        int faceId;
+        if (existingFaceIndex != -1) {
+           faceId = _detectedFaces[existingFaceIndex]['id']; // Reuse ID
+        } else {
+           faceId = _faceIdCounter++;
+        }
+
+        final newFaceData = {
           'id': faceId,
+          'trackingId': trackingId, 
           'left': left,
           'top': top,
           'width': width,
           'height': height,
-          'status': 'detecting', // detecting, processing, matched, unmatched
-          'userName': null,
-          'similarity': null,
-        });
+          // matched > processing > detecting > unmatched
+          'status': knownFace != null ? 'matched' : (existingFaceIndex != -1 ? _detectedFaces[existingFaceIndex]['status'] : 'detecting'),
+          'userName': knownFace != null ? knownFace['name'] : (existingFaceIndex != -1 ? _detectedFaces[existingFaceIndex]['userName'] : null),
+          'similarity': knownFace != null ? knownFace['similarity'] : null,
+        };
+
+        detectedFacesMap.add(newFaceData);
         
         newFaceDataMap[faceId] = {
           'face': face,
@@ -658,10 +698,13 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
         };
       }
 
-      // ✅ OPTIMIZED: Update UI immediately with face boxes
+      // ✅ OPTIMIZED: Update UI carefully to prevent flickering
       if (mounted) {
         setState(() {
-          _detectedFaces = detectedFacesMap;
+           // Instead of hard replacing, we might want to animate transition, 
+           // but since we reused IDs where possible, flutter should handle it.
+           // However, let's keep the list stable.
+           _detectedFaces = detectedFacesMap;
         });
       }
 
@@ -673,6 +716,17 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
       
       for (int i = 0; i < facesToProcess.length; i++) {
         final faceId = detectedFacesMap[i]['id'] as int;
+        final trackingId = facesToProcess[i].trackingId;
+        
+        // ✅ OPTIMIZATION: Skip processing if we already know who this is (via trackingId)
+        if (trackingId != null && _persistentFaceTracker.containsKey(trackingId)) {
+           // We already have this face in our tracker, UI is already updated above.
+           // We just need to ensure we don't re-process duplicate attendance if not needed.
+           // For UX, just keeping the box green is enough.
+           debugPrint('⏭️ Skipped recognition for trackingId $trackingId (${_persistentFaceTracker[trackingId]?['name']})');
+           continue;
+        }
+
         futures.add(_processFaceAsync(
           facesToProcess[i],
           image.path,
@@ -704,15 +758,9 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
         // ✅ OPTIMIZED: Process attendance in queue to prevent lag
         _addToProcessingQueue(() => _processMultipleAttendances(processedUsers));
         
-        // ✅ NEW: Clear face boxes after a delay to show success
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) {
-            setState(() {
-              _detectedFaces = [];
-              _faceDataMap.clear();
-            });
-          }
-        });
+        // ✅ NEW: Don't clear face boxes! Keep them tracking.
+        // The user requested: "tetap ada menyesuaikan orangnya sampai orangnya keluar kamera"
+        // So we keep _detectedFaces as is. It will be updated by the next scan cycle.
       } else {
         if (faces.isNotEmpty) {
           // Update face status to unmatched
@@ -726,15 +774,8 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
             });
           }
           
-          // ✅ NEW: Clear unmatched faces after delay
-          Future.delayed(const Duration(seconds: 3), () {
-            if (mounted) {
-              setState(() {
-                _detectedFaces = [];
-                _faceDataMap.clear();
-              });
-            }
-          });
+          // ✅ NEW: Don't clear unmatched faces. Keep them tracking (red box).
+          // Future.delayed... removed.
         }
         
         // ✅ OPTIMIZED: Play sound in background
@@ -820,8 +861,9 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
       final bestMatch = await _biometricService.identifyBestMatchWithUserInfo(
         capturedTemplate: capturedTemplate,
         organizationId: widget.organizationId,
-        threshold: 0.80, // ✅ INCREASED: Higher threshold to prevent false matches
-        strict: !_isOnline,
+
+        threshold: 0.70, // ✅ RELAXED: 0.70 for distance/motion support
+        strict: false, // Always non-strict for better UX in motion
       );
 
       debugPrint('👤 FACE $faceIndex: Best match result: ${bestMatch != null ? "FOUND" : "NOT FOUND"}');
@@ -852,9 +894,9 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
       final userName = bestMatch['user_name'] ?? 'Unknown';
       final similarity = (bestMatch['similarity'] as num?)?.toDouble() ?? 0.0;
       
-      // ✅ STRICT: Require minimum similarity of 80% to prevent false matches
-      if (similarity < 0.80) {
-        debugPrint('❌ FACE $faceIndex: Match rejected - similarity ${(similarity * 100).toStringAsFixed(2)}% below 80% threshold');
+      // ✅ SAFE: Require minimum similarity of 70%
+      if (similarity < 0.70) {
+        debugPrint('❌ FACE $faceIndex: Match rejected - similarity ${(similarity * 100).toStringAsFixed(2)}% below 70% threshold');
         // ✅ NEW: Update face status to unmatched
         if (mounted) {
           setState(() {
@@ -884,6 +926,16 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
             faceData['similarity'] = similarity;
           }
         });
+      }
+
+      // ✅ TRACKING: Save to persistent tracker
+      if (face.trackingId != null) {
+        _persistentFaceTracker[face.trackingId!] = {
+          'name': userName,
+          'similarity': similarity,
+          'memberId': userId,
+          'lastSeen': DateTime.now(),
+        };
       }
       
       // ✅ NEW: Check if this face already matched with a different user in this scan
@@ -1071,94 +1123,19 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
         return;
       }
 
-      bool syncedOnline = false;
-      String? syncError;
-      // Direct sync when online; otherwise queue will ship later
+      // ✅ FAST: Schedule background sync after 30 seconds (as requested)
+      // This ensures UI is updated immediately without waiting for server
       if (_isOnline) {
-        debugPrint('🔄 Syncing face attendance to server for: $userName (ID: $memberId)');
-
-        // Upload photo first (with timeout)
-        String photoUrl = '';
-        if (localPhotoPath != null && localPhotoPath.isNotEmpty) {
-          try {
-            final photoFile = File(localPhotoPath);
-            if (await photoFile.exists()) {
-              debugPrint('📸 Uploading photo for member $memberId...');
-              photoUrl = await _storageService.uploadAttendancePhoto(
-                photoFile,
-                memberId,
-                attendanceType,
-              ).timeout(const Duration(seconds: 5), onTimeout: () => '');
-              if (photoUrl.isNotEmpty) {
-                debugPrint('✅ Photo uploaded successfully: $photoUrl');
-              }
-            }
-          } catch (e) {
-            debugPrint('⚠️ Failed to upload photo (continuing without photo): $e');
-            // Continue without photo
-          }
-        }
-        
-        // Prepare location data
-        Map<String, dynamic>? locationData;
-        if (_currentPosition?.latitude != null && _currentPosition?.longitude != null) {
-          locationData = {
-            'latitude': _currentPosition!.latitude,
-            'longitude': _currentPosition!.longitude,
-          };
-        }
-        
-        try {
-          if (attendanceType == 'check_in') {
-            await _attendanceService.checkIn(
-              organizationMemberId: memberId,
-              photoUrl: photoUrl,
-              method: 'face_recognition_kiosk',
-              organizationTimezone: _organizationTimezone,
-              location: locationData,
-              rawData: {
-                'face_recognition': true,
-                'work_time_mode': workTimeMode,
-              },
-            ).timeout(const Duration(seconds: 5));
-            debugPrint('✅ Successfully synced check_in for member $memberId');
-          } else {
-            await _attendanceService.checkOut(
-              organizationMemberId: memberId,
-              photoUrl: photoUrl,
-              method: 'face_recognition_kiosk',
-              organizationTimezone: _organizationTimezone,
-              location: locationData,
-              rawData: {
-                'face_recognition': true,
-                'work_time_mode': workTimeMode,
-              },
-            ).timeout(const Duration(seconds: 5));
-            debugPrint('✅ Successfully synced check_out for member $memberId');
-          }
-          syncedOnline = true;
-        } catch (e) {
-          syncError = e.toString();
-          debugPrint('❌ Failed to sync face recognition attendance: $e');
-        }
-      } else {
-        debugPrint('📴 Offline mode, attendance queued for sync: $userName');
+        Timer(const Duration(seconds: 30), () {
+          debugPrint('⏰ Triggering delayed sync for member $memberId');
+          AttendanceSyncService().syncPendingAttendances();
+        });
       }
-
-      if (offlineId != null) {
-        await _offlineDb.updateSyncStatus(
-          id: offlineId,
-          isSynced: syncedOnline,
-          syncError: syncError,
-        ).timeout(const Duration(seconds: 1), onTimeout: () => 0);
-        if (syncedOnline) {
-          await _offlineDb.deleteSuccessfullySyncedAttendances().timeout(const Duration(seconds: 1), onTimeout: () => 0);
-        }
-      }
-
-      if (syncedOnline) {
-        await _biometricService.updateLastUsed(user['biometric_id']).timeout(const Duration(seconds: 1), onTimeout: () => 0);
-      }
+      
+      // Update biometric timestamp regardless of sync status (since it was used)
+      try {
+         await _biometricService.updateLastUsed(user['biometric_id']).timeout(const Duration(seconds: 1), onTimeout: () => 0);
+      } catch (_) {}
 
       // ✅ NOTE: Timestamp already set in _processFaceAsync before processing
       // This ensures user won't be processed again even if attendance fails
@@ -1190,9 +1167,8 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
       }
 
       successfulAttendances.add('$userName (${isCheckIn ? "Masuk" : "Keluar"})');
-      if (!syncedOnline) {
-        updateHasQueuedOffline(true);
-      }
+      // Treat everything as queued initially until background sync picks it up
+      updateHasQueuedOffline(true);
 
     } catch (e) {
       final userName = userData['user']['user_name'] ?? 'Unknown';
@@ -1632,27 +1608,48 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
             // ✅ IMPROVED: Face Detection Overlays - Pas dengan ukuran wajah dan tampilkan nama
             if (_detectedFaces.isNotEmpty && _cameraController != null)
               ..._detectedFaces.map((face) {
-                final cameraAspectRatio = _cameraController!.value.aspectRatio;
+                // ✅ FIXED: Correct Aspect Ratio & Mirroring Logic for BoxFit.cover
                 final screenWidth = screenSize.width;
                 final screenHeight = screenSize.height;
+                final previewSize = _cameraController!.value.previewSize!;
+                // Swap width/height because we are in portrait but previewSize is landscape (sensor)
+                final videoWidth = previewSize.height;
+                final videoHeight = previewSize.width;
                 
-                double previewWidth, previewHeight;
-                if (screenWidth / screenHeight > cameraAspectRatio) {
-                  previewHeight = screenHeight;
-                  previewWidth = screenHeight * cameraAspectRatio;
+                final screenRatio = screenWidth / screenHeight;
+                final videoRatio = videoWidth / videoHeight;
+                
+                double scale;
+                if (screenRatio > videoRatio) {
+                  // Screen is wider than video -> Match width
+                  scale = screenWidth / videoWidth;
                 } else {
-                  previewWidth = screenWidth;
-                  previewHeight = screenWidth / cameraAspectRatio;
+                  // Screen is taller than video -> Match height
+                  scale = screenHeight / videoHeight;
                 }
                 
-                final offsetX = (screenWidth - previewWidth) / 2;
-                final offsetY = (screenHeight - previewHeight) / 2;
+                final scaledWidth = videoWidth * scale;
+                final scaledHeight = videoHeight * scale;
                 
-                // ✅ FIXED: Kotak pas dengan ukuran wajah tanpa padding berlebihan
-                final left = offsetX + (face['left'] as num).toDouble() * previewWidth;
-                final top = offsetY + (face['top'] as num).toDouble() * previewHeight;
-                final width = (face['width'] as num).toDouble() * previewWidth;
-                final height = (face['height'] as num).toDouble() * previewHeight;
+                // Center the video in the screen
+                final offsetX = (screenWidth - scaledWidth) / 2;
+                final offsetY = (screenHeight - scaledHeight) / 2;
+                
+                // Get normalized coordinates from detection
+                double nLeft = (face['left'] as num).toDouble();
+                double nTop = (face['top'] as num).toDouble();
+                double nWidth = (face['width'] as num).toDouble();
+                double nHeight = (face['height'] as num).toDouble();
+                
+                // ✅ MIRRORING: Flip X for front camera
+                // Since we use a file (non-mirrored) but preview is mirrored
+                nLeft = 1.0 - (nLeft + nWidth);
+                
+                // Map to screen coordinates
+                final left = offsetX + nLeft * scaledWidth;
+                final top = offsetY + nTop * scaledHeight;
+                final width = nWidth * scaledWidth;
+                final height = nHeight * scaledHeight;
                 
                 final status = face['status'] as String? ?? 'detecting';
                 final userName = face['userName'] as String?;
@@ -1669,13 +1666,13 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
                     borderColor = Colors.blue;
                     glowColor = Colors.blue.withOpacity(0.4);
                     statusIcon = Icons.search;
-                    statusText = 'Mendeteksi...';
+                    statusText = null; // ✅ HIDDEN
                     break;
                   case 'processing':
                     borderColor = Colors.orange;
                     glowColor = Colors.orange.withOpacity(0.4);
                     statusIcon = Icons.hourglass_empty;
-                    statusText = 'Memproses...';
+                    statusText = null; // ✅ HIDDEN
                     break;
                   case 'matched':
                     borderColor = Colors.green;

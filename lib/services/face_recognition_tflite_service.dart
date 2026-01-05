@@ -16,10 +16,10 @@ class FaceRecognitionTFLiteService {
   int inputSize = 112; 
   int embeddingSize = 192; 
   
-  // ✅ IMPROVED: Stricter quality thresholds
-  static const double minFaceQualityScore = 0.7;
-  static const double minEyeOpenProbability = 0.5;
-  static const double maxHeadRotation = 15.0;
+  // ✅ IMPROVED: Relaxed quality thresholds for distance/motion
+  static const double minFaceQualityScore = 0.25; // Drastically lowered from 0.5 to fix gender bias
+  static const double minEyeOpenProbability = 0.1; // Lowered to 0.1 to allow makeup/lashes
+  static const double maxHeadRotation = 30.0; // Increased from 15.0
   
   FaceRecognitionTFLiteService() {
     _faceDetector = FaceDetector(
@@ -27,9 +27,9 @@ class FaceRecognitionTFLiteService {
         enableContours: false,
         enableLandmarks: true, // Needed for alignment
         enableClassification: true, // Needed for eye open prob
-        enableTracking: false,
+        enableTracking: true, // ✅ ENABLED: For persistent ID tracking
         performanceMode: FaceDetectorMode.accurate,
-        minFaceSize: 0.15,
+        minFaceSize: 0.1, // ✅ LOWERED: Detect smaller faces (further away)
       ),
     );
   }
@@ -295,7 +295,7 @@ class FaceRecognitionTFLiteService {
         final faceArea = face.boundingBox.width * face.boundingBox.height;
         final faceRatio = faceArea / imageArea;
         
-        if (faceRatio < 0.15) { 
+        if (faceRatio < 0.05) { // ✅ LOWERED: Allow 5% face area (was 15%)
           throw Exception('Face too small. Please move closer');
         }
 

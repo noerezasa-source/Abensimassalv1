@@ -11,7 +11,15 @@ class BiometricService {
   final SupabaseClient _supabase = Supabase.instance.client;
   final OfflineDatabaseService _offlineDb = OfflineDatabaseService();
 
-  static const double defaultThreshold = 0.75; // ✅ Lowered from 0.80 to 0.75 for better recognition
+  static const double defaultThreshold = 0.75; 
+
+  // ✅ PERFORMANCE: Static instances to persist across multiple BiometricService creations
+  // This prevents reloading the heavy TFLite model and Isolate on every match
+  static FaceRecognitionTFLiteService? _persistentFaceService;
+  static List<Map<String, dynamic>>? _memoryTemplateCache;
+  static Map<int, Map<String, dynamic>>? _parsedTemplateCache;
+  static int? _cachedOrganizationId;
+
 
   Future<BiometricData> registerFaceTemplate({
     required int organizationMemberId,
@@ -69,6 +77,11 @@ class BiometricService {
           .single();
 
       debugPrint('✅ Face template registered with version $version');
+      
+      // ✅ Cache Invalidation: Clear cache so next identification fetches new data
+      _memoryTemplateCache = null;
+      _parsedTemplateCache = null;
+
       return BiometricData.fromJson(result);
     } catch (e) {
       throw Exception('Failed to register face template: $e');
@@ -223,205 +236,147 @@ class BiometricService {
     bool strict = false,
   }) async {
     try {
-      debugPrint('=== IDENTIFYING BEST MATCH (TFLite) ===');
-      debugPrint('Organization ID: $organizationId');
-      debugPrint('Threshold: ${(threshold * 100).toStringAsFixed(0)}%');
+      final startTime = DateTime.now();
+      debugPrint('=== IDENTIFYING BEST MATCH (OPTIMIZED) ===');
 
-      // ✅ STRICT: Higher threshold to prevent false matches
-      final effectiveThreshold = strict ? (threshold < 0.80 ? 0.80 : threshold) : (threshold < 0.80 ? 0.80 : threshold);
-      final minSimilarityGap = strict ? 0.15 : 0.12; // ✅ INCREASED: Larger gap required to prevent ambiguous matches
-      if (strict) {
-        debugPrint('Strict matching: ON (threshold ${(effectiveThreshold * 100).toStringAsFixed(0)}%, gap ${(minSimilarityGap * 100).toStringAsFixed(0)}%)');
+      // 1. Initialize Service ONCE
+      if (_persistentFaceService == null) {
+        debugPrint('🚀 Initializing persistent face service...');
+        _persistentFaceService = FaceRecognitionTFLiteService();
+        await _persistentFaceService!.initialize();
+      }
+      final faceService = _persistentFaceService!;
+
+      // 2. Load and Cache Templates ONCE (per session/org)
+      if (_memoryTemplateCache == null || _cachedOrganizationId != organizationId) {
+        debugPrint('📥 Loading templates into memory cache for Org $organizationId...');
+        _memoryTemplateCache = await getAllActiveFaceTemplatesWithUserInfo(organizationId);
+        _cachedOrganizationId = organizationId;
+        
+        // Pre-parse JSON to avoid decoding in the loop
+        _parsedTemplateCache = {};
+        for (var template in _memoryTemplateCache!) {
+          try {
+            _parsedTemplateCache![template['id']] = jsonDecode(template['template_data']);
+          } catch (e) {
+            debugPrint('⚠️ Error parsing template ${template['id']}: $e');
+          }
+        }
+        debugPrint('✅ Cached ${_parsedTemplateCache!.length} parsed templates in memory');
       }
 
+      final effectiveThreshold = strict ? (threshold < 0.75 ? 0.75 : threshold) : (threshold < 0.65 ? 0.65 : threshold);
+      final minSimilarityGap = strict ? 0.10 : 0.05; // Relaxed gap check
       final capturedVersion = capturedTemplate['version'] ?? 3;
-      debugPrint('Captured template version: $capturedVersion');
 
       if (strict) {
         final capturedQuality = (capturedTemplate['qualityScore'] as num?)?.toDouble() ?? 0.0;
         if (capturedQuality < 0.80) {
-          debugPrint('❌ Strict match rejected: captured quality too low (${capturedQuality.toStringAsFixed(2)})');
-          return null;
+           debugPrint('❌ Strict match rejected: low quality');
+           return null;
         }
       }
 
-      final allTemplates = await getAllActiveFaceTemplatesWithUserInfo(organizationId);
-
-      if (allTemplates.isEmpty) {
-        debugPrint('No registered faces found in organization');
+      if (_memoryTemplateCache!.isEmpty) {
+        debugPrint('No registered faces found in cache');
         return null;
       }
-
-      final faceService = FaceRecognitionTFLiteService();
-      await faceService.initialize();
 
       Map<String, dynamic>? bestMatch;
       double highestSimilarity = 0.0;
       double secondHighestSimilarity = 0.0;
       String? secondBestName;
 
-      for (var template in allTemplates) {
-        try {
-          final registeredTemplate = jsonDecode(template['template_data']);
-          final templateVersion = registeredTemplate['version'] ?? 2; // Read from JSON
-          
-          // Check version compatibility
-          // Allow: v3 with v3, v4 with v4, v3 captured with v4 stored (multi-template)
-          if (capturedVersion != templateVersion && 
-              !(capturedVersion == 3 && templateVersion == 4)) {
-            // Skip incompatible versions (v2 or others)
-            if (capturedVersion < 3 || templateVersion < 3) {
-              debugPrint('⚠️  Version mismatch: captured=$capturedVersion, stored=$templateVersion');
-              continue;
-            }
-          }
+      // 3. Fast Comparison Loop (Using Cached Parsed Data)
+      for (var template in _memoryTemplateCache!) {
+        // Skip calling DB/JSON decode - use memory cache
+        final registeredTemplate = _parsedTemplateCache![template['id']];
+        if (registeredTemplate == null) continue;
 
-          // Handle multi-template (version 4 stored template)
-          double similarity = 0.0;
-          if (templateVersion == 4 && registeredTemplate['templates'] != null) {
-            // ✅ IMPROVED: Multi-template matching with max + front boost
-            // Compare captured template with all 3 stored templates (front, left, right)
-            // Use max similarity but give boost if front template matches well
+        // --- Core Comparison Logic (Same as before) ---
+        final templateVersion = registeredTemplate['version'] ?? 2;
+        
+        if (capturedVersion != templateVersion && 
+            !(capturedVersion == 3 && templateVersion == 4)) {
+          if (capturedVersion < 3 || templateVersion < 3) continue;
+        }
+
+        double similarity = 0.0;
+        if (templateVersion == 4 && registeredTemplate['templates'] != null) {
             final templates = registeredTemplate['templates'] as List;
             double maxSimilarity = 0.0;
-            double frontSimilarity = 0.0;
-            
             for (int i = 0; i < templates.length; i++) {
-              final storedTemplate = templates[i] as Map<String, dynamic>;
-              final templateSim = faceService.compareFaces(
-                capturedTemplate,
-                storedTemplate,
-              );
-              
-              if (i == 0) {
-                frontSimilarity = templateSim; // Store front template similarity
-              }
-              
-              if (templateSim > maxSimilarity) {
-                maxSimilarity = templateSim;
-              }
+              final storedTemplate = templates[i];
+               // Optimization: Avoid casting if possible, or trust structure
+              final templateSim = faceService.compareFaces(capturedTemplate, storedTemplate);
+              if (templateSim > maxSimilarity) maxSimilarity = templateSim;
             }
-            
-            // ✅ REMOVED BOOST: Use max similarity directly to prevent false positives
-            // Boost was causing multiple people to match with high similarity
             similarity = maxSimilarity;
-            debugPrint('✅ Multi-template match: ${(similarity * 100).toStringAsFixed(2)}% (max from ${templates.length} templates, front: ${(frontSimilarity * 100).toStringAsFixed(2)}%)');
-          } else if (capturedVersion == 4 && capturedTemplate['templates'] != null) {
-            // If captured is also multi-template (unlikely but handle it)
-            // Compare all captured templates with registered template and take weighted average
+        } else if (capturedVersion == 4 && capturedTemplate['templates'] != null) {
             final capturedTemplates = capturedTemplate['templates'] as List;
             double totalSimilarity = 0.0;
             double totalWeight = 0.0;
-            
             for (int i = 0; i < capturedTemplates.length; i++) {
-              final capTemplate = capturedTemplates[i] as Map<String, dynamic>;
-              final templateSim = faceService.compareFaces(
-                capTemplate,
-                registeredTemplate,
-              );
-              
+              final capTemplate = capturedTemplates[i];
+              final templateSim = faceService.compareFaces(capTemplate, registeredTemplate);
               final weight = i == 0 ? 0.5 : 0.25;
               totalSimilarity += templateSim * weight;
               totalWeight += weight;
             }
-            
             similarity = totalWeight > 0 ? totalSimilarity / totalWeight : 0.0;
-          } else {
-            // Single template comparison (version 3 or old version)
-            similarity = faceService.compareFaces(
-              capturedTemplate,
-              registeredTemplate,
-            );
-          }
+        } else {
+            similarity = faceService.compareFaces(capturedTemplate, registeredTemplate);
+        }
 
-          final orgMember = template['organization_members'];
-          final userProfile = orgMember['user_profiles'];
-          final dept = orgMember['departments'];
+        if (similarity > highestSimilarity) {
+          secondHighestSimilarity = highestSimilarity;
+          secondBestName = bestMatch?['user_name'];
+          highestSimilarity = similarity;
           
-          final firstName = userProfile['first_name'] ?? '';
-          final lastName = userProfile['last_name'] ?? '';
-          final displayName = userProfile['display_name'] ?? '$firstName $lastName';
-          
-          debugPrint('Comparing with: $displayName, Similarity: ${(similarity * 100).toStringAsFixed(2)}%');
-
-          // ✅ CRITICAL FIX: Track ALL similarities (above and below threshold)
-          // This ensures we correctly calculate gap even when second best is below threshold
-          // Example: top1=80.47%, top2=76.68% (below 80% threshold) -> gap=3.79% (should reject!)
-          if (similarity > highestSimilarity) {
-            // New best match found - move old best to second
-            secondHighestSimilarity = highestSimilarity;
-            secondBestName = bestMatch?['user_name'] as String?;
-
-            highestSimilarity = similarity;
-
-            // Only set as bestMatch if above threshold
-            if (similarity >= effectiveThreshold) {
-              bestMatch = {
+          if (similarity >= effectiveThreshold) {
+             final orgMember = template['organization_members'];
+             final userProfile = orgMember['user_profiles'];
+             final dept = orgMember['departments'];
+             
+             bestMatch = {
                 'organization_member_id': template['organization_member_id'],
                 'biometric_id': template['id'],
                 'similarity': similarity,
                 'organization_id': orgMember['organization_id'],
                 'user_id': orgMember['user_id'],
                 'employee_id': orgMember['employee_id'],
-                'user_name': displayName.trim(),
-                'first_name': firstName,
-                'last_name': lastName,
+                'user_name': (userProfile['display_name'] ?? '').toString().isEmpty 
+                    ? '${userProfile['first_name']} ${userProfile['last_name']}' 
+                    : userProfile['display_name'],
+                'first_name': userProfile['first_name'],
+                'last_name': userProfile['last_name'],
                 'profile_photo_url': userProfile['profile_photo_url'],
-                'department_name': dept != null ? (dept['name'] as String?) : null,
-                'template_version': templateVersion, // From JSON
-              };
-            }
-          } else if (similarity > secondHighestSimilarity) {
-            // New second best match (regardless of threshold)
-            secondHighestSimilarity = similarity;
-            secondBestName = displayName.trim();
+                'department_name': dept != null ? dept['name'] : null,
+                'template_version': templateVersion,
+             };
           }
-        } catch (e) {
-          debugPrint('Error processing template: $e');
-          continue;
+        } else if (similarity > secondHighestSimilarity) {
+           secondHighestSimilarity = similarity;
+           final orgMember = template['organization_members'];
+           final userProfile = orgMember['user_profiles'];
+           secondBestName = userProfile['display_name'] ?? '${userProfile['first_name']}';
         }
       }
 
-      faceService.dispose();
-
+      // 4. Final Verification
       if (bestMatch != null) {
-        // ✅ STRICT: Reject if gap is too small (multiple people match too closely)
         final similarityGap = highestSimilarity - secondHighestSimilarity;
-        
-        // ✅ ADDITIONAL CHECK: Require minimum similarity above threshold
-        if (highestSimilarity < effectiveThreshold) {
-          debugPrint('❌ Match rejected: similarity ${(highestSimilarity * 100).toStringAsFixed(2)}% below threshold ${(effectiveThreshold * 100).toStringAsFixed(0)}%');
-          return null;
-        }
-        
-        // ✅ STRICT: Always reject if gap is too small (ambiguous match)
-        // This prevents 1 face from matching multiple people
+        if (highestSimilarity < effectiveThreshold) return null;
         if (secondHighestSimilarity > 0.0 && similarityGap < minSimilarityGap) {
-          debugPrint(
-            '⚠️ Ambiguous match rejected: top1=${(highestSimilarity * 100).toStringAsFixed(2)}% (${bestMatch['user_name']}) '
-            'top2=${(secondHighestSimilarity * 100).toStringAsFixed(2)}% (${secondBestName ?? "-"}) '
-            'gap=${(similarityGap * 100).toStringAsFixed(2)}% (required: ${(minSimilarityGap * 100).toStringAsFixed(0)}%)',
-          );
-          return null;
+           debugPrint('⚠️ Ambiguous match rejected: gap ${(similarityGap*100).toStringAsFixed(2)}%');
+           return null;
         }
-        
-        // ✅ FINAL CHECK: If second highest is also above threshold and gap is small, reject
-        // This is an extra safety check for ambiguous matches
-        if (secondHighestSimilarity >= effectiveThreshold && similarityGap < (minSimilarityGap * 1.5)) {
-          debugPrint(
-            '⚠️ Ambiguous match rejected (both above threshold): top1=${(highestSimilarity * 100).toStringAsFixed(2)}% (${bestMatch['user_name']}) '
-            'top2=${(secondHighestSimilarity * 100).toStringAsFixed(2)}% (${secondBestName ?? "-"}) '
-            'gap=${(similarityGap * 100).toStringAsFixed(2)}%',
-          );
-          return null;
-        }
-        
-        debugPrint('✅ Best match found: ${bestMatch['user_name']} with ${(bestMatch['similarity'] * 100).toStringAsFixed(2)}% similarity (gap: ${(similarityGap * 100).toStringAsFixed(2)}%, second: ${(secondHighestSimilarity * 100).toStringAsFixed(2)}%)');
+        debugPrint('✅ MATCH FOUND: ${bestMatch['user_name']} (${(highestSimilarity*100).toStringAsFixed(1)}%) in ${DateTime.now().difference(startTime).inMilliseconds}ms');
       } else {
-        debugPrint('❌ No match found above threshold ${(effectiveThreshold * 100).toStringAsFixed(0)}%');
+         debugPrint('❌ No match. Top: ${(highestSimilarity*100).toStringAsFixed(1)}%');
       }
 
-      return bestMatch;
+      return bestMatch; 
     } catch (e) {
       debugPrint('!!! ERROR in identifyBestMatchWithUserInfo: $e');
       return null;

@@ -94,8 +94,8 @@ class _FaceRegistrationPageState extends State<FaceRegistrationPage> {
       if (mounted) {
         setState(() {
           _isCameraInitialized = true;
-          _currentStep = 'Foto 1/3 - DEPAN';
-          _guidanceMessage = 'Hadapkan wajah ke depan';
+          _currentStep = '1/3 - DEPAN';
+          _guidanceMessage = 'Lihat Kamera';
         });
         _startFaceDetection();
       }
@@ -107,7 +107,8 @@ class _FaceRegistrationPageState extends State<FaceRegistrationPage> {
   }
 
   void _startFaceDetection() {
-    _detectionTimer = Timer.periodic(const Duration(milliseconds: 1500), (timer) {
+    // ✅ CHECK: Running automatically every 800ms (Auto-capture enabled)
+    _detectionTimer = Timer.periodic(const Duration(milliseconds: 800), (timer) {
       if (!_isProcessing && 
           _isCameraInitialized && 
           _isModelInitialized && 
@@ -120,10 +121,10 @@ class _FaceRegistrationPageState extends State<FaceRegistrationPage> {
   
   String _getPoseName(int index) {
     switch (index) {
-      case 0: return 'depan';
-      case 1: return 'samping kiri';
-      case 2: return 'samping kanan';
-      default: return 'depan';
+      case 0: return 'DEPAN';
+      case 1: return 'KIRI';
+      case 2: return 'KANAN';
+      default: return 'DEPAN';
     }
   }
 
@@ -218,7 +219,9 @@ class _FaceRegistrationPageState extends State<FaceRegistrationPage> {
     final leftEyeOpen = face.leftEyeOpenProbability ?? 0.0;
     final rightEyeOpen = face.rightEyeOpenProbability ?? 0.0;
     
-    if (leftEyeOpen < 0.3 || rightEyeOpen < 0.3) {
+    if (leftEyeOpen < 0.1 || rightEyeOpen < 0.1) {
+      // Just log warning, but maybe don't block? 
+      // For now, allow 0.1 as a very low bar.
       return {
         'isValid': false,
         'message': 'Buka mata Anda',
@@ -230,49 +233,32 @@ class _FaceRegistrationPageState extends State<FaceRegistrationPage> {
     
     // Validate pose based on current pose index
     if (poseIndex == 0) {
-      // Front face: headY should be close to 0
-      if (headY.abs() > 15.0) {
-        final direction = headY > 0 ? 'kanan' : 'kiri';
+      // Front face: relax tolerance to 20 degrees
+      if (headY.abs() > 20.0) {
         return {
           'isValid': false,
-          'message': 'Hadapkan wajah ke depan - jangan miring $direction',
+          'message': 'Lihat Lurus ke Depan',
         };
       }
     } else if (poseIndex == 1) {
-      // Left side: headY should be negative (turned left)
-      // Range yang lebih longgar: -10 sampai -50 derajat (lebih mudah dicapai)
-      if (headY > -10.0) {
-        return {
-          'isValid': false,
-          'message': 'Putar kepala ke kiri perlahan',
-        };
-      }
-      if (headY < -50.0) {
-        return {
-          'isValid': false,
-          'message': 'Terlalu miring - sedikit luruskan',
-        };
-      }
-      // Valid jika sudah masuk range
-    } else if (poseIndex == 2) {
-      // Right side: headY should be positive (turned right)
-      // Range yang lebih longgar: 10 sampai 50 derajat
+      // Left side: Inverted logic (User turns Left -> Camera sees Positive Angle)
       if (headY < 10.0) {
         return {
           'isValid': false,
-          'message': 'Putar kepala ke kanan perlahan',
+          'message': 'Toleh KIRI',
         };
       }
-      if (headY > 50.0) {
+    } else if (poseIndex == 2) {
+      // Right side: Inverted logic (User turns Right -> Camera sees Negative Angle)
+      if (headY > -10.0) {
         return {
           'isValid': false,
-          'message': 'Terlalu miring - sedikit luruskan',
+          'message': 'Toleh KANAN',
         };
       }
-      // Valid jika sudah masuk range
     }
     
-    if (headZ > 20.0) {
+    if (headZ > 35.0) { // ✅ RELAXED: Increased from 20.0
       return {
         'isValid': false,
         'message': 'Jangan miringkan kepala ke samping',
@@ -288,7 +274,7 @@ class _FaceRegistrationPageState extends State<FaceRegistrationPage> {
       final faceArea = face.boundingBox.width * face.boundingBox.height;
       final faceRatio = faceArea / imageArea;
       
-      if (faceRatio < 0.12) {
+      if (faceRatio < 0.10) { // ✅ RELAXED: Lowered from 0.12
         return {
           'isValid': false,
           'message': 'Mendekatlah ke kamera',
@@ -335,19 +321,27 @@ class _FaceRegistrationPageState extends State<FaceRegistrationPage> {
       _currentPoseIndex++;
       
       if (_currentPoseIndex < 3) {
-        // Continue to next pose
-        await Future.delayed(const Duration(milliseconds: 1500));
+        // Continue to next pose - FAST TRANSITION
+        setState(() {
+          _overlayColor = Colors.green;
+          _guidanceMessage = 'OK! Lanjut ${_getPoseName(_currentPoseIndex)}...';
+        });
+        
+        await Future.delayed(const Duration(milliseconds: 500)); // ✅ REDUCED DELAY
         
         setState(() {
           _overlayColor = Colors.blue;
-          _guidanceMessage = 'Sekarang miringkan ke ${_getPoseName(_currentPoseIndex)}';
-          _currentStep = 'Foto ${_currentPoseIndex}/3 - ${_getPoseName(_currentPoseIndex).toUpperCase()}';
+          _guidanceMessage = 'Toleh ${_getPoseName(_currentPoseIndex)} SEKARANG';
+          _currentStep = '${_currentPoseIndex + 1}/3 - ${_getPoseName(_currentPoseIndex)}';
         });
         
-        await Future.delayed(const Duration(milliseconds: 1000));
       } else {
-        // All poses captured, register multi-template
+        // All poses captured, register multi-template IMMEDIATELY
         _detectionTimer?.cancel();
+        setState(() {
+           _guidanceMessage = 'Selesai! Menyimpan...';
+           _overlayColor = Colors.green;
+        });
         await _registerMultiTemplate();
       }
     } catch (e) {
