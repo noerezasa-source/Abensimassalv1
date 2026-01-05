@@ -240,7 +240,7 @@ class _FaceAttendanceMultiUserPageState
   }
 
 
-  void _showMessage(String message, MessageType type, {int seconds = 3}) {
+  void _showMessage(String message, MessageType type, {int seconds = 2}) {
     _messageTimer?.cancel();
     
     setState(() {
@@ -249,7 +249,7 @@ class _FaceAttendanceMultiUserPageState
     });
 
     _messageTimer = Timer(Duration(seconds: seconds), () {
-      if (mounted && !_isProcessing) {
+      if (mounted) {
         setState(() {
           _currentMessage = null;
           _messageType = MessageType.idle;
@@ -522,7 +522,7 @@ class _FaceAttendanceMultiUserPageState
     // ✅ OPTIMIZED: Reduced scan frequency and added debouncing
     // ✅ FIXED: Prevent camera restart by checking if camera is still initialized
     _continuousScanTimer = Timer.periodic(
-      const Duration(milliseconds: 800), // ✅ FASTER: 800ms
+      const Duration(milliseconds: 400), // ✅ FASTER: 400ms
       (timer) {
         if (!_isProcessing && 
             _isCameraInitialized && 
@@ -566,7 +566,7 @@ class _FaceAttendanceMultiUserPageState
     try {
       // ✅ OPTIMIZED: Take picture and detect faces (already async, but add timeout)
       final image = await _cameraController!.takePicture().timeout(
-        const Duration(seconds: 3),
+        const Duration(seconds: 1, milliseconds: 500),
         onTimeout: () {
           throw TimeoutException('Camera takePicture timeout');
         },
@@ -575,7 +575,7 @@ class _FaceAttendanceMultiUserPageState
       
       // ✅ OPTIMIZED: Add timeout to face detection to prevent hanging
       final faces = await _faceService.detectFaces(image.path).timeout(
-        const Duration(seconds: 5),
+        const Duration(seconds: 2),
         onTimeout: () {
           debugPrint('⚠️ Face detection timeout');
           return <Face>[];
@@ -612,7 +612,7 @@ class _FaceAttendanceMultiUserPageState
 
       if (!_hasFacesInView) {
         _hasFacesInView = true;
-        _showMessage('${faces.length} wajah terdeteksi - Memproses...', MessageType.processing);
+        // _showMessage('${faces.length} wajah terdeteksi - Memproses...', MessageType.processing);
       }
 
       debugPrint('📊 PROCESSING: Starting to process ${faces.length} faces');
@@ -802,7 +802,7 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
     } finally {
       // ✅ OPTIMIZED: Add cooldown after processing to prevent rapid scanning
       _isProcessing = false;
-      await Future.delayed(const Duration(milliseconds: 800)); // Increased cooldown
+      await Future.delayed(const Duration(milliseconds: 100)); // Increased cooldown
     }
   }
   
@@ -993,31 +993,8 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
         return;
       }
       
-      // Check online if available
-      if (_isOnline) {
-        try {
-          final existingRecord = await _attendanceService.getTodayAttendance(
-            userId,
-            organizationTimezone: _organizationTimezone,
-          ).timeout(const Duration(seconds: 2), onTimeout: () => null);
-          
-          if (existingRecord != null) {
-            if (attendanceType == 'check_in' && existingRecord.actualCheckIn != null) {
-              debugPrint('⏭️ USER $userName: Already checked in today, skipping');
-              _processedUserTimestamps[userId] = DateTime.now();
-              updateCounters(0, 1, 0);
-              return;
-            } else if (attendanceType == 'check_out' && existingRecord.actualCheckOut != null) {
-              debugPrint('⏭️ USER $userName: Already checked out today, skipping');
-              _processedUserTimestamps[userId] = DateTime.now();
-              updateCounters(0, 1, 0);
-              return;
-            }
-          }
-        } catch (e) {
-          debugPrint('Error checking online attendance: $e');
-        }
-      }
+      // ❌ REMOVED ONLINE CHECK to ensure speed
+      // if (_isOnline) { ... }
 
       // ✅ IMPROVED: Set timestamp BEFORE adding to list to prevent duplicate processing
       _processedUserTimestamps[userId] = DateTime.now();
@@ -1056,40 +1033,31 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
       final attendanceType = isCheckIn ? 'check_in' : 'check_out';
       final workTimeMode = _getWorkTimeMode();
       
-      // ✅ OPTIMIZED: Defer heavy operations with timeout
+      // ✅ OPTIMIZED: Defer heavy operations with timeout (300ms)
+      // If network is slow, we skip the photo to keep UI fast
       final profilePhotoBase64 = await _getProfilePhotoBase64(
         memberId,
         user['profile_photo_url'] as String?,
-      ).timeout(const Duration(seconds: 2), onTimeout: () => null);
+      ).timeout(const Duration(milliseconds: 300), onTimeout: () => null);
       final departmentName = user['department_name'] as String?;
 
       final todayStr = TimezoneHelper.getCurrentDateInOrgTimezone(_organizationTimezone);
       bool alreadyRecorded = false;
       
-      // ✅ OPTIMIZED: Check duplicate faster (offline first, then online if needed)
+      // ✅ OPTIMIZED: Check duplicate faster (offline ONLY)
+      // We explicitly skip online check here to ensure instant feedback.
+      // The background sync service will handle true duplicates later.
       alreadyRecorded = await _offlineDb.hasDuplicateAttendance(
         organizationMemberId: memberId,
         eventType: attendanceType,
         attendanceDate: todayStr,
       ).timeout(const Duration(seconds: 1), onTimeout: () => false);
       
-      if (!alreadyRecorded && _isOnline) {
-        try {
-          final existingRecord = await _attendanceService.getTodayAttendance(
-            memberId,
-            organizationTimezone: _organizationTimezone,
-          ).timeout(const Duration(seconds: 2), onTimeout: () => null);
-          
-          if (existingRecord != null) {
-            if (attendanceType == 'check_in' && existingRecord.actualCheckIn != null) {
-              alreadyRecorded = true;
-            } else if (attendanceType == 'check_out' && existingRecord.actualCheckOut != null) {
-              alreadyRecorded = true;
-            }
-          }
-        } catch (e) {
-          debugPrint('Error checking online attendance: $e');
-        }
+      // ❌ REMOVED ONLINE CHECK to ensure speed regardless of signal
+      // if (!alreadyRecorded && _isOnline) { ... }
+      
+      if (alreadyRecorded) {
+        return; // Skip without message to reduce UI updates
       }
       
       if (alreadyRecorded) {
@@ -1184,7 +1152,7 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
     if (usersData.isNotEmpty) {
       final firstUser = usersData.first['user'];
       final firstName = firstUser['user_name'] ?? 'Unknown';
-      _showMessage('Memproses absen untuk $firstName...', MessageType.processing);
+      // _showMessage('Memproses absen untuk $firstName...', MessageType.processing);
     }
 
     final successfulAttendances = <String>[];
@@ -1192,7 +1160,7 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
     bool hasQueuedOffline = false;
 
     // ✅ OPTIMIZED: Process users in parallel batches (max 2 at a time to prevent overload)
-    const batchSize = 2;
+    const batchSize = 5;
     for (int i = 0; i < usersData.length; i += batchSize) {
       final batch = usersData.skip(i).take(batchSize).toList();
       await Future.wait(
@@ -1215,7 +1183,7 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
         message = '$message (akan disinkronkan otomatis)';
       }
       
-      _showMessage(message, MessageType.success, seconds: 3);
+      _showMessage(message, MessageType.success, seconds: 2);
     }
 
     if (failedAttendances.isNotEmpty) {
@@ -1466,15 +1434,11 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
 
     if (pickedMode != null && mounted) {
       setState(() => _attendanceMode = pickedMode);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Mode ${pickedMode == 'check_in' ? 'IN' : 'OUT'} dipilih'
-            '${_selectedMode != null ? ' • ${_selectedMode!['name']}' : ''}',
-          ),
-          backgroundColor: const Color(0xFF9333EA),
-          duration: const Duration(seconds: 2),
-        ),
+      _showMessage(
+        'Berhasil mengubah mode ke ${pickedMode == 'check_in' ? 'Masuk' : 'Keluar'}'
+        '${_selectedMode != null ? ' (${_selectedMode!['name']})' : ''}',
+        MessageType.success,
+        seconds: 2,
       );
     }
   }
@@ -1493,12 +1457,10 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
       newMode: newMode,
       onConfirm: () {
         setState(() => _attendanceMode = newMode);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Mode diubah ke ${newMode == 'check_in' ? 'Check In' : 'Check Out'}'),
-            backgroundColor: const Color(0xFF9333EA),
-            duration: const Duration(seconds: 2),
-          ),
+        _showMessage(
+          'Berhasil mengubah mode ke ${newMode == 'check_in' ? 'Check In' : 'Check Out'}',
+          MessageType.success,
+          seconds: 2,
         );
       },
     );
@@ -2276,12 +2238,10 @@ final height = ((expandedBottom - expandedTop) / imageHeight).clamp(0.0, 1.0);
     return GestureDetector(
       onTap: () {
         setState(() => _workTimeMode = mode);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Mode diubah ke $label'),
-            backgroundColor: const Color(0xFF9333EA),
-            duration: const Duration(seconds: 2),
-          ),
+        _showMessage(
+          'Berhasil mengubah mode ke $label',
+          MessageType.success,
+          seconds: 2,
         );
       },
       child: AnimatedContainer(
