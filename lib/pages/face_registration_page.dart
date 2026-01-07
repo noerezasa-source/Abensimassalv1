@@ -200,12 +200,18 @@ class _FaceRegistrationPageState extends State<FaceRegistrationPage> {
     final leftEyeOpen = face.leftEyeOpenProbability ?? 0.0;
     final rightEyeOpen = face.rightEyeOpenProbability ?? 0.0;
     
-    if (leftEyeOpen < 0.1 || rightEyeOpen < 0.1) {
-      // Just log warning, but maybe don't block? 
-      // For now, allow 0.1 as a very low bar.
+    
+    if (leftEyeOpen < 0.4 || rightEyeOpen < 0.4) {
+      // ✅ STRICT: Require both eyes to be at least 40% open for good quality
+      String eyeMessage = 'Buka mata Anda';
+      if (leftEyeOpen < 0.4 && rightEyeOpen >= 0.4) {
+        eyeMessage = 'Buka mata kiri Anda';
+      } else if (rightEyeOpen < 0.4 && leftEyeOpen >= 0.4) {
+        eyeMessage = 'Buka mata kanan Anda';
+      }
       return {
         'isValid': false,
-        'message': 'Buka mata Anda',
+        'message': eyeMessage,
       };
     }
 

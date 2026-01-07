@@ -533,10 +533,10 @@ class _FaceAttendanceMultiUserPageState
   }
 
   void _startContinuousScan() {
-    // ✅ OPTIMIZED: 250ms provides better responsiveness while keeping camera stable
+    // ✅ BALANCED: 200ms provides good responsiveness while maintaining accuracy
     // ✅ FIXED: Prevent camera restart by checking if camera is still initialized
     _continuousScanTimer = Timer.periodic(
-      const Duration(milliseconds: 250), // ✅ FASTER: 250ms (Balanced Speed)
+      const Duration(milliseconds: 200), // ✅ BALANCED: 200ms for accuracy + speed
       (timer) {
         if (!_isProcessing && 
             _isCameraInitialized && 
@@ -578,18 +578,18 @@ class _FaceAttendanceMultiUserPageState
     _isProcessing = true;
 
     try {
-      // ✅ FAST: 1s timeout is sufficient for modern phones, fail fast if stuck
+      // ✅ BALANCED: 800ms timeout ensures good image quality for accurate recognition
       final image = await _cameraController!.takePicture().timeout(
-        const Duration(milliseconds: 1000), // ✅ FASTER: 1s timeout
+        const Duration(milliseconds: 800), // ✅ BALANCED: 800ms for quality
         onTimeout: () {
           throw TimeoutException('Camera takePicture timeout');
         },
       );
       final imageFile = File(image.path);
       
-      // ✅ OPTIMIZED: Reduce detection timeout for real-time feel
+      // ✅ BALANCED: Adequate timeout for accurate ML Kit face detection
       final faces = await _faceService.detectFaces(image.path).timeout(
-        const Duration(milliseconds: 800), // ✅ FASTER: 800ms to allow UI updates
+        const Duration(milliseconds: 700), // ✅ BALANCED: 700ms for accurate detection
         onTimeout: () {
           debugPrint('⚠️ Face detection timeout');
           return <Face>[];
@@ -859,7 +859,7 @@ class _FaceAttendanceMultiUserPageState
           debugPrint('⚠️ Queue task timeout');
         });
         // Minimal delay between tasks for better performance
-        await Future.delayed(const Duration(milliseconds: 100));
+        await Future.delayed(const Duration(milliseconds: 50));
       }
     } finally {
       _isQueueProcessing = false;
@@ -898,7 +898,7 @@ class _FaceAttendanceMultiUserPageState
         capturedTemplate: capturedTemplate,
         organizationId: widget.organizationId,
 
-        threshold: 0.70, // ✅ RELAXED: 0.70 for distance/motion support
+        threshold: 0.73, // ✅ BALANCED: 0.73 for good recognition rate with accuracy
         strict: false, // Always non-strict for better UX in motion
       );
 
@@ -930,9 +930,9 @@ class _FaceAttendanceMultiUserPageState
       final userName = bestMatch['user_name'] ?? 'Unknown';
       final similarity = (bestMatch['similarity'] as num?)?.toDouble() ?? 0.0;
       
-      // ✅ SAFE: Require minimum similarity of 70%
-      if (similarity < 0.70) {
-        debugPrint('❌ FACE $faceIndex: Match rejected - similarity ${(similarity * 100).toStringAsFixed(2)}% below 70% threshold');
+      // ✅ BALANCED: Require minimum similarity of 73% for good recognition
+      if (similarity < 0.73) {
+        debugPrint('❌ FACE $faceIndex: Match rejected - similarity ${(similarity * 100).toStringAsFixed(2)}% below 73% threshold');
         // ✅ NEW: Update face status to unmatched
         if (mounted) {
           setState(() {
