@@ -49,6 +49,12 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
 
   List<Map<String, dynamic>> _recentActivities = [];
 
+  // Weekly overview data
+  bool _isLoadingWeeklyData = true;
+  double _totalWeeklyHours = 0.0;
+  double _weeklyPercentageChange = 0.0;
+  List<double> _dailyHours = [0.0, 0.0, 0.0, 0.0, 0.0]; // Mon-Fri
+
   @override
   void initState() {
     super.initState();
@@ -61,6 +67,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
     _loadOrganizationInfo();
     _loadRfidMode();
     _refreshAll();
+    _loadWeeklyOverview();
   }
 
   Future<void> _loadUserProfile() async {
@@ -286,16 +293,22 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
         });
 
         if (activity['event_type'] == 'check_in') {
+          // If multiple check-ins, usually we want the EARLIEST for the "Check In" slot,
+          // but since the loop is NEWEST to OLDEST (DESC), we overwrite to let the 
+          // last iteration (oldest) win for earliest check-in time.
           entry['checkInTime'] = eventTime;
           entry['checkInMethod'] = activity['method'];
         } else if (activity['event_type'] == 'check_out') {
-          entry['checkOutTime'] = eventTime;
-          entry['checkOutMethod'] = activity['method'];
+          // For Check Out, we want the LATEST. Since loop is NEWEST to OLDEST,
+          // the first check_out we encounter is the latest one.
+          entry['checkOutTime'] ??= eventTime;
+          entry['checkOutMethod'] ??= activity['method'];
         }
 
-        entry['lastAction'] = activity['event_type'];
-        entry['method'] = activity['method'];
-        entry['lastUpdated'] = eventTime;
+        // These should reflect the LATEST action overall
+        entry['lastAction'] ??= activity['event_type'];
+        entry['method'] ??= activity['method'];
+        entry['lastUpdated'] ??= eventTime;
       }
 
       final mappedActivities = groupedActivities.values.toList()
@@ -337,6 +350,131 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
         _recentActivities = [];
         _errorMessage ??= 'Failed to load recent activities: $e';
       });
+    }
+  }
+
+  Future<void> _loadWeeklyOverview() async {
+    final organizationId = widget.memberData['organization_id'] as int?;
+    if (organizationId == null) {
+      setState(() {
+        _isLoadingWeeklyData = false;
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoadingWeeklyData = true;
+    });
+
+    try {
+      // Get current week (Monday to Friday)
+      final now = DateTime.now();
+      final currentWeekday = now.weekday; // 1 = Monday, 7 = Sunday
+      
+      // Calculate Monday of current week
+      final monday = now.subtract(Duration(days: currentWeekday - 1));
+      final mondayStr = monday.toIso8601String().split('T')[0];
+      
+      // Calculate Friday of current week
+      final friday = monday.add(const Duration(days: 4));
+      final fridayStr = friday.toIso8601String().split('T')[0];
+
+      // Get last week's Monday and Friday for comparison
+      final lastMonday = monday.subtract(const Duration(days: 7));
+      final lastMondayStr = lastMonday.toIso8601String().split('T')[0];
+      final lastFriday = lastMonday.add(const Duration(days: 4));
+      final lastFridayStr = lastFriday.toIso8601String().split('T')[0];
+
+      debugPrint('Loading weekly overview: $mondayStr to $fridayStr');
+
+      // Fetch current week's attendance records
+      final currentWeekRecords = await _supabase
+          .from('attendance_records')
+          .select('''
+            attendance_date,
+            work_duration_minutes,
+            organization_members!inner(organization_id)
+          ''')
+          .eq('organization_members.organization_id', organizationId)
+          .gte('attendance_date', mondayStr)
+          .lte('attendance_date', fridayStr);
+
+      // Fetch last week's attendance records
+      final lastWeekRecords = await _supabase
+          .from('attendance_records')
+          .select('''
+            work_duration_minutes,
+            organization_members!inner(organization_id)
+          ''')
+          .eq('organization_members.organization_id', organizationId)
+          .gte('attendance_date', lastMondayStr)
+          .lte('attendance_date', lastFridayStr);
+
+      // Calculate daily hours for current week
+      final dailyHoursMap = <int, double>{
+        1: 0.0, // Monday
+        2: 0.0, // Tuesday
+        3: 0.0, // Wednesday
+        4: 0.0, // Thursday
+        5: 0.0, // Friday
+      };
+
+      double totalMinutes = 0.0;
+      for (final record in currentWeekRecords as List) {
+        final dateStr = record['attendance_date'] as String?;
+        final minutes = record['work_duration_minutes'] as int?;
+        
+        if (dateStr != null && minutes != null && minutes > 0) {
+          final date = DateTime.parse(dateStr);
+          final weekday = date.weekday;
+          
+          if (weekday >= 1 && weekday <= 5) {
+            dailyHoursMap[weekday] = (dailyHoursMap[weekday] ?? 0.0) + (minutes / 60.0);
+            totalMinutes += minutes;
+          }
+        }
+      }
+
+      // Calculate last week's total
+      double lastWeekMinutes = 0.0;
+      for (final record in lastWeekRecords as List) {
+        final minutes = record['work_duration_minutes'] as int?;
+        if (minutes != null && minutes > 0) {
+          lastWeekMinutes += minutes;
+        }
+      }
+
+      // Calculate percentage change
+      double percentageChange = 0.0;
+      if (lastWeekMinutes > 0) {
+        percentageChange = ((totalMinutes - lastWeekMinutes) / lastWeekMinutes) * 100;
+      } else if (totalMinutes > 0) {
+        percentageChange = 100.0; // If no data last week but have data this week
+      }
+
+      if (mounted) {
+        setState(() {
+          _totalWeeklyHours = totalMinutes / 60.0;
+          _weeklyPercentageChange = percentageChange;
+          _dailyHours = [
+            dailyHoursMap[1]!,
+            dailyHoursMap[2]!,
+            dailyHoursMap[3]!,
+            dailyHoursMap[4]!,
+            dailyHoursMap[5]!,
+          ];
+          _isLoadingWeeklyData = false;
+        });
+      }
+
+      debugPrint('Weekly overview loaded: ${_totalWeeklyHours.toStringAsFixed(1)} hrs, ${_weeklyPercentageChange.toStringAsFixed(1)}% change');
+    } catch (e) {
+      debugPrint('!!! ERROR loading weekly overview: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingWeeklyData = false;
+        });
+      }
     }
   }
 
@@ -616,6 +754,11 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
 
   @override
   Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final hour = now.hour.toString().padLeft(2, '0');
+    final minute = now.minute.toString().padLeft(2, '0');
+    final currentTime = '$hour:$minute';
+    
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       body: RefreshIndicator(
@@ -624,197 +767,127 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
           physics: const AlwaysScrollableScrollPhysics(),
           child: Column(
             children: [
-              // HEADER CARD - Diperkecil
+              // HEADER WITH PROFILE
               Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(8, 20, 12, 32),
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [Color(0xFF6B46C1), Color(0xFF9333EA)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(24),
-                    bottomRight: Radius.circular(24),
+                    colors: [Color(0xFF8938DF), Color(0xFF4A1E79)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
                   ),
                 ),
-                padding: const EdgeInsets.fromLTRB(16, 44, 16, 20),
                 child: Column(
                   children: [
-                    // Top bar - Diperkecil
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.3),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Icon(
-                            Icons.calendar_today,
-                            color: Colors.white,
-                            size: 16,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          _getCurrentDate(),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    // Profile Card - Diperkecil
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.08),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
+                    // Logo in top-left corner
+                    Align(
+                      alignment: Alignment.topLeft,
+                      child: Image.asset(
+                        'assets/logo/app_logo.png',
+                        width: 130,
+                        height: 130,
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) {
+                          return const SizedBox.shrink();
+                        },
                       ),
-                      child: Row(
+                    ),
+                    // PROFILE SECTION (Photo, Name, Role, Date) - Combined
+                    Transform.translate(
+                      offset: const Offset(0, -30),
+                      child: Column(
                         children: [
-                          // Profile Image - Diperkecil
-                          Stack(
-                            children: [
-                              Container(
-                                width: 56,
-                                height: 56,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: const Color(0xFF9333EA),
-                                    width: 2.5,
-                                  ),
-                                  color: Colors.grey.shade100,
-                                ),
-                                child: ClipOval(
-                                  child: _getProfilePhotoUrl() != null
-                                      ? Image.network(
-                                          _getProfilePhotoUrl()!,
-                                          fit: BoxFit.cover,
-                                          errorBuilder:
-                                              (context, error, stackTrace) {
-                                            return const Icon(
-                                              Icons.person,
-                                              size: 28,
-                                              color: Colors.grey,
-                                            );
-                                          },
-                                        )
-                                      : const Icon(
-                                          Icons.person,
-                                          size: 28,
-                                          color: Colors.grey,
-                                        ),
-                                ),
-                              ),
-                              Positioned(
-                                top: 0,
-                                right: 0,
-                                child: Container(
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF9333EA),
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: Colors.white,
-                                      width: 2,
-                                    ),
-                                  ),
-                                  child: const Icon(
-                                    Icons.badge,
-                                    size: 12,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(width: 12),
-                          // Profile Info - Diperkecil
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _getFullName().isNotEmpty
-                                      ? _getFullName()
-                                      : 'User',
-                                  style: const TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                // Petugas Badge - Diperkecil
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFF3E8FF),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(
-                                        Icons.badge,
-                                        size: 11,
-                                        color: Color(0xFF9333EA),
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        _roleService.getRoleName(
-                                          widget.memberData,
-                                        ),
-                                        style: const TextStyle(
-                                          fontSize: 10,
-                                          color: Color(0xFF9333EA),
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                if (_organization != null) ...[
-                                  const SizedBox(height: 6),
-                                  // Organization - Diperkecil
-                                  Row(
-                                    children: [
-                                      Icon(
-                                        Icons.business,
-                                        size: 11,
-                                        color: Colors.grey.shade600,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Expanded(
-                                        child: Text(
-                                          _organization!['name'] ??
-                                              'Unknown Organization',
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            color: Colors.grey.shade600,
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                          // Profile Photo
+                          Container(
+                            width: 120,
+                            height: 120,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: LinearGradient(
+                                colors: [
+                                  Colors.pink.shade200,
+                                  Colors.purple.shade200,
                                 ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.2),
+                                  blurRadius: 20,
+                                  offset: const Offset(0, 10),
+                                ),
+                              ],
+                            ),
+                            child: ClipOval(
+                              child: _getProfilePhotoUrl() != null
+                                  ? Image.network(
+                                      _getProfilePhotoUrl()!,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (context, error, stackTrace) {
+                                        return const Icon(
+                                          Icons.person,
+                                          size: 60,
+                                          color: Colors.white,
+                                        );
+                                      },
+                                    )
+                                  : const Icon(
+                                      Icons.person,
+                                      size: 60,
+                                      color: Colors.white,
+                                    ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          // Name
+                          Text(
+                            _getFullName().isNotEmpty ? _getFullName() : 'User',
+                            style: const TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          // Role and Organization
+                          Text(
+                            '${_roleService.getRoleName(widget.memberData)}${_organization != null ? ' - ${_organization!['name']}' : ''}',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.white.withValues(alpha: 0.9),
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 8),
+                          // Date
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.calendar_today,
+                                  color: Colors.white,
+                                  size: 14,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  _getCurrentDate(),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -825,249 +898,398 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                 ),
               ),
 
-              if (_errorMessage != null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                  child: Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.red.shade50,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.red.shade100),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.warning_amber_rounded,
-                          color: Colors.redAccent,
-                          size: 16,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _errorMessage!,
-                            style: const TextStyle(
-                              color: Colors.redAccent,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.close,
-                            size: 14,
-                            color: Colors.redAccent,
-                          ),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          onPressed: () {
-                            setState(() {
-                              _errorMessage = null;
-                            });
-                          },
-                        ),
-                      ],
-                    ),
+              // WHITE CONTENT AREA
+              Container(
+                decoration: const BoxDecoration(
+                  color: Color(0xFFF5F5F5),
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(32),
+                    topRight: Radius.circular(32),
                   ),
                 ),
-
-              const SizedBox(height: 16),
-
-              // QUICK ACTIONS - Diperkecil
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      "Quick Actions",
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        const SizedBox(width: 8),
-                        _QuickActionCard(
-                          icon: Icons.people,
-                          label: 'Manual Check',
-                          color: Colors.blue.shade50,
-                          iconColor: Colors.blue,
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => ManualCheckPage(
-                                  organizationMemberId:
-                                      widget.organizationMemberId,
-                                  memberData: widget.memberData,
-                                ),
+                    // COMBINED TIME & CHECK-IN CARD (OVERLAPPING)
+                    Transform.translate(
+                      offset: const Offset(0, -40),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.1),
+                                blurRadius: 20,
+                                offset: const Offset(0, 10),
                               ),
-                            ).then((_) {
-                              _refreshAll();
-                            });
-                          },
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // TODAY'S SUMMARY - Diperkecil
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      "Today's Summary",
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _StatCard(
-                            value: _isLoadingStats ? '-' : '$_checkedInCount',
-                            label: 'Checked In',
-                            color: Colors.green.shade50,
-                            icon: Icons.login,
-                            iconColor: Colors.green,
+                            ],
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: _StatCard(
-                            value: _isLoadingStats ? '-' : '$_lateCount',
-                            label: 'Late',
-                            color: Colors.yellow.shade50,
-                            icon: Icons.warning,
-                            iconColor: Colors.orange,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: _StatCard(
-                            value: _isLoadingStats ? '-' : '$_checkedOutCount',
-                            label: 'Checked Out',
-                            color: Colors.red.shade50,
-                            icon: Icons.logout,
-                            iconColor: Colors.red,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // RECENT ACTIVITY - Diperkecil
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          'Recent Activity',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black87,
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Full history coming soon'),
-                              ),
-                            );
-                          },
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                          child: const Text(
-                            'View All',
-                            style: TextStyle(fontSize: 11),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    if (_isLoadingActivities)
-                      Container(
-                        padding: const EdgeInsets.all(32),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Center(
-                          child: SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        ),
-                      )
-                    else if (_recentActivities.isEmpty)
-                      Container(
-                        padding: const EdgeInsets.all(32),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Center(
                           child: Column(
                             children: [
-                              Icon(
-                                Icons.history,
-                                size: 36,
-                                color: Colors.grey.shade300,
+                              // Time and Location Row
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Current Time',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.grey.shade600,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '$currentTime ${now.hour < 12 ? 'AM' : 'PM'}',
+                                          style: const TextStyle(
+                                            fontSize: 28,
+                                            fontWeight: FontWeight.bold,
+                                            color: Color(0xFF7E22CE),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Container(
+                                    width: 1,
+                                    height: 40,
+                                    color: Colors.grey.shade200,
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Office Location',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.grey.shade600,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Row(
+                                          children: [
+                                            const Icon(
+                                              Icons.location_on,
+                                              color: Color(0xFF7E22CE),
+                                              size: 16,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Expanded(
+                                              child: Text(
+                                                _organization?['name'] ?? 'Office',
+                                                style: const TextStyle(
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Colors.black87,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'No recent activity',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey.shade600,
+                              const SizedBox(height: 16),
+                              // Check In Button
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton(
+                                  onPressed: _handleCameraButtonPress,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF7E22CE),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(vertical: 16),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    elevation: 0,
+                                  ),
+                                  child: const Text(
+                                    'Chek In With Another Way',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ],
                           ),
                         ),
-                      )
-                    else
-                      Column(
-                        children: _recentActivities
-                            .map((activity) => _buildActivityItem(activity))
-                            .toList(),
                       ),
+                    ),
+
+                    Transform.translate(
+                      offset: const Offset(0, -20),
+                      child: const SizedBox(height: 0),
+                    ),
+
+                    // WEEKLY OVERVIEW
+                    Transform.translate(
+                      offset: const Offset(0, -30),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'Weekly Overview',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black87,
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF3E8FF),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Text(
+                                  'THIS WEEK',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF9333EA),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          Container(
+                            padding: const EdgeInsets.all(20),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.05),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      _isLoadingWeeklyData
+                                          ? '--'
+                                          : _totalWeeklyHours.toStringAsFixed(1),
+                                      style: const TextStyle(
+                                        fontSize: 36,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.black87,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    const Padding(
+                                      padding: EdgeInsets.only(bottom: 8),
+                                      child: Text(
+                                        'hrs',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          color: Colors.black54,
+                                        ),
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    Row(
+                                      children: [
+                                        Container(
+                                          width: 12,
+                                          height: 12,
+                                          decoration: const BoxDecoration(
+                                            color: Color(0xFF9333EA),
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        const Text(
+                                          'HOURS',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.black54,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                if (!_isLoadingWeeklyData)
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        _weeklyPercentageChange >= 0
+                                            ? Icons.trending_up
+                                            : Icons.trending_down,
+                                        color: _weeklyPercentageChange >= 0
+                                            ? Colors.green.shade600
+                                            : Colors.red.shade600,
+                                        size: 16,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '${_weeklyPercentageChange >= 0 ? '+' : ''}${_weeklyPercentageChange.toStringAsFixed(1)}% from last week',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: _weeklyPercentageChange >= 0
+                                              ? Colors.green.shade600
+                                              : Colors.red.shade600,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                const SizedBox(height: 24),
+                                // Bar Chart
+                                if (!_isLoadingWeeklyData)
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceAround,
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      _buildBarChart('MON', _dailyHours[0]),
+                                      _buildBarChart('TUE', _dailyHours[1]),
+                                      _buildBarChart('WED', _dailyHours[2]),
+                                      _buildBarChart('THU', _dailyHours[3]),
+                                      _buildBarChart('FRI', _dailyHours[4]),
+                                    ],
+                                  )
+                                else
+                                  const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(20),
+                                      child: CircularProgressIndicator(),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    ),
+
+                    // RECENT ACTIVITY
+                    Transform.translate(
+                      offset: const Offset(0, -30),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'Recent Activity',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black87,
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: () {
+                                  _handleNavigation(2);
+                                },
+                                child: const Text(
+                                  'View All',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Color(0xFF9333EA),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          if (_isLoadingActivities)
+                            Container(
+                              padding: const EdgeInsets.all(32),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: const Center(
+                                child: SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              ),
+                            )
+                          else if (_recentActivities.isEmpty)
+                            Container(
+                              padding: const EdgeInsets.all(32),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Center(
+                                child: Column(
+                                  children: [
+                                    Icon(
+                                      Icons.history,
+                                      size: 48,
+                                      color: Colors.grey.shade300,
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      'No recent activity',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.grey.shade600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )
+                          else
+                            Column(
+                              children: _recentActivities
+                                  .take(3)
+                                  .map((activity) =>
+                                      _buildModernActivityItem(activity))
+                                  .toList(),
+                            ),
+                        ],
+                      ),
+                    ),
+                    ),
+
+                    const SizedBox(height: 100),
                   ],
                 ),
               ),
-
-              const SizedBox(height: 80),
             ],
           ),
         ),
@@ -1076,6 +1298,240 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
         currentIndex: _currentNavIndex,
         onNavigationTap: _handleNavigation,
         onAttendanceTap: _handleCameraButtonPress,
+      ),
+    );
+  }
+
+  Widget _buildBarChart(String day, double hours) {
+    // Find max hours for normalization
+    final maxHours = _dailyHours.reduce((a, b) => a > b ? a : b);
+    
+    // Calculate height (normalize to 0-1 range, with minimum 20% for visibility)
+    double normalizedHeight = 0.2; // Minimum height for empty days
+    if (maxHours > 0 && hours > 0) {
+      normalizedHeight = (hours / maxHours).clamp(0.2, 1.0);
+    }
+    
+    // Check if this is the current day
+    final now = DateTime.now();
+    final dayIndex = ['MON', 'TUE', 'WED', 'THU', 'FRI'].indexOf(day);
+    final isCurrentDay = now.weekday == dayIndex + 1;
+    
+    return Column(
+      children: [
+        Container(
+          width: 40,
+          height: 100 * normalizedHeight,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: isCurrentDay
+                  ? [const Color(0xFF9333EA), const Color(0xFF7C3AED)]
+                  : [
+                      const Color(0xFF9333EA).withValues(alpha: 0.3),
+                      const Color(0xFF7C3AED).withValues(alpha: 0.3),
+                    ],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          day,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: isCurrentDay ? FontWeight.bold : FontWeight.w500,
+            color: isCurrentDay
+                ? const Color(0xFF9333EA)
+                : Colors.grey.shade600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildModernActivityItem(Map<String, dynamic> activity) {
+    final name = activity['name'] as String? ?? 'Unknown User';
+    final checkInTime = activity['checkInTime'] as DateTime?;
+    final checkOutTime = activity['checkOutTime'] as DateTime?;
+    final lastUpdated = activity['lastUpdated'] as DateTime?;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          if (checkInTime != null)
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.login,
+                    color: Colors.green.shade600,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Check In',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        lastUpdated != null
+                            ? _formatEventTime(lastUpdated)
+                            : 'Unknown time',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      _formatShortTime(checkInTime),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    Container(
+                      margin: const EdgeInsets.only(top: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'ON TIME',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green.shade700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          if (checkInTime != null && checkOutTime != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Divider(
+                height: 1,
+                color: Colors.grey.shade200,
+              ),
+            ),
+          if (checkOutTime != null)
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.logout,
+                    color: Colors.red.shade600,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Check Out',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        lastUpdated != null
+                            ? _formatEventTime(lastUpdated)
+                            : 'Unknown time',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      _formatShortTime(checkOutTime),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    Container(
+                      margin: const EdgeInsets.only(top: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'REGULAR',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue.shade700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+        ],
       ),
     );
   }

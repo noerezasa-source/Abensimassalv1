@@ -18,15 +18,18 @@ class PetugasBottomNav extends StatelessWidget {
     final hasAttendanceButton = onAttendanceTap != null;
 
     return Container(
-      height: 75 + bottomPadding,
-      padding: EdgeInsets.only(bottom: 8 + bottomPadding),
+      height: 70 + bottomPadding,
       decoration: BoxDecoration(
         color: Colors.white,
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(24),
+          topRight: Radius.circular(24),
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 20,
-            offset: const Offset(0, -4),
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 16,
+            offset: const Offset(0, -2),
           ),
         ],
       ),
@@ -35,7 +38,12 @@ class PetugasBottomNav extends StatelessWidget {
         children: [
           // Bottom Navigation Items
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 8,
+              bottom: 8 + bottomPadding,
+            ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
@@ -52,7 +60,7 @@ class PetugasBottomNav extends StatelessWidget {
                   1,
                 ),
                 // Spacer untuk tombol attendance di tengah (hanya jika ada)
-                if (hasAttendanceButton) const SizedBox(width: 70),
+                if (hasAttendanceButton) const SizedBox(width: 80),
                 _buildNavItem(
                   context,
                   Icons.list_alt_rounded,
@@ -71,36 +79,40 @@ class PetugasBottomNav extends StatelessWidget {
           // Attendance Button di tengah yang timbul (hanya jika onAttendanceTap != null)
           if (hasAttendanceButton)
             Positioned(
-              left: MediaQuery.of(context).size.width / 2 - 35,
-              top: -30,
+              left: MediaQuery.of(context).size.width / 2 - 32,
+              top: -28,
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
                   onTap: onAttendanceTap,
-                  borderRadius: BorderRadius.circular(35),
+                  borderRadius: BorderRadius.circular(32),
                   child: Container(
-                    width: 70,
-                    height: 70,
+                    width: 64,
+                    height: 64,
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
-                        colors: [Color(0xFF9333EA), Color(0xFF6B46C1)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
+                        colors: [Color(0xFF9333EA), Color(0xFF7C3AED)],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
                       ),
                       shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white,
+                        width: 4,
+                      ),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFF9333EA).withValues(alpha: 0.5),
-                          blurRadius: 20,
-                          offset: const Offset(0, 8),
-                          spreadRadius: 2,
+                          color: const Color(0xFF9333EA).withValues(alpha: 0.4),
+                          blurRadius: 16,
+                          offset: const Offset(0, 4),
+                          spreadRadius: 0,
                         ),
                       ],
                     ),
                     child: const Icon(
-                      Icons.how_to_reg_rounded,
+                      Icons.face_retouching_natural_rounded,
                       color: Colors.white,
-                      size: 32,
+                      size: 28,
                     ),
                   ),
                 ),
@@ -125,14 +137,14 @@ class PetugasBottomNav extends StatelessWidget {
           onTap: () => onNavigationTap(index),
           borderRadius: BorderRadius.circular(12),
           child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 4),
+            padding: const EdgeInsets.symmetric(vertical: 2),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.all(6),
+                  padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
                     color: isSelected
                         ? const Color(0xFF9333EA).withValues(alpha: 0.1)
@@ -144,14 +156,14 @@ class PetugasBottomNav extends StatelessWidget {
                     color: isSelected
                         ? const Color(0xFF9333EA)
                         : Colors.grey.shade600,
-                    size: 24,
+                    size: 22,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   label,
                   style: TextStyle(
-                    fontSize: 10,
+                    fontSize: 9,
                     color: isSelected
                         ? const Color(0xFF9333EA)
                         : Colors.grey.shade600,
