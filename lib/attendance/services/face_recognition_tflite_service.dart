@@ -8,7 +8,7 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:image/image.dart' as img;
 import 'isolate_inference_service.dart';
 import 'face_anti_spoofing_service.dart';
-import '../helpers/timezone_helper.dart';
+import '../../helpers/timezone_helper.dart';
 
 class FaceRecognitionTFLiteService {
   late final FaceDetector _faceDetector;

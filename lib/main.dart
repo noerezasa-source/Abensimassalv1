@@ -7,7 +7,7 @@ import 'package:absensimassal/auth/services/role_service.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'package:absensimassal/services/attendance_sync_service.dart';
+import 'package:absensimassal/attendance/services/attendance_sync_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 Future<void> main() async {

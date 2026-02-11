@@ -4,10 +4,10 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../models/biometric_data.dart';
+import '../../models/biometric_data.dart';
 import 'face_recognition_tflite_service.dart';
-import 'offline_database_service.dart';
-import '../helpers/timezone_helper.dart';
+import '../../services/offline_database_service.dart';
+import '../../helpers/timezone_helper.dart';
 
 class BiometricService {
   final SupabaseClient _supabase = Supabase.instance.client;

@@ -8,7 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import '../services/face_recognition_tflite_service.dart';
 import '../services/biometric_service.dart';
-import '../services/supabase_storage_service.dart';
+import '../../services/supabase_storage_service.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:google_mlkit_commons/google_mlkit_commons.dart';
 

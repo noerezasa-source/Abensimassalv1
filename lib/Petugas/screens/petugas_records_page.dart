@@ -6,7 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/attendance_record.dart';
-import '../../services/attendance_service.dart';
+import '../../attendance/services/attendance_service.dart';
 import '../../helpers/timezone_helper.dart';
 import '../../auth/services/role_service.dart';
 import '../../helpers/rfid_mode_helper.dart';

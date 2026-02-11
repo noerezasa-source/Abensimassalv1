@@ -5,10 +5,10 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import '../models/offline_attendance.dart';
-import './offline_database_service.dart';
-import './attendance_service.dart';
-import './supabase_storage_service.dart';
+import '../../models/offline_attendance.dart';
+import '../../services/offline_database_service.dart';
+import 'attendance_service.dart';
+import '../../services/supabase_storage_service.dart';
 
 class AttendanceSyncService {
   static final AttendanceSyncService _instance = AttendanceSyncService._internal();

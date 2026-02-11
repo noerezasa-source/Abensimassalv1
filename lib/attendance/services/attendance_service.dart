@@ -1,8 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../models/attendance_record.dart';
-import '../models/work_schedule_models.dart';
-import '../helpers/timezone_helper.dart';
+import '../../models/attendance_record.dart';
+import '../../models/work_schedule_models.dart';
+import '../../helpers/timezone_helper.dart';
 
 class AttendanceService {
   final SupabaseClient _supabase = Supabase.instance.client;

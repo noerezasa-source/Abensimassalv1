@@ -2,15 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../helpers/timezone_helper.dart';
 import '../../helpers/rfid_mode_helper.dart';
-import '../../services/attendance_service.dart';
+import '../../attendance/services/attendance_service.dart';
 import '../../auth/services/role_service.dart';
 import '../widgets/petugas_bottom_nav.dart';
-import '../../pages/face_attendance_multi_user_page.dart';
+import '../../attendance/screens/face_attendance_multi_user_page.dart';
 import 'petugas_members_page.dart';
 import 'petugas_records_page.dart';
 import 'petugas_profile_page.dart';
-import '../../pages/rfid_attendance_page.dart';
-import '../../pages/manual_check_page.dart';
+import '../../attendance/screens/rfid_attendance_page.dart';
+import '../../attendance/screens/manual_check_page.dart';
 
 class PetugasDashboardPage extends StatefulWidget {
   final int organizationMemberId;

@@ -1,6 +1,6 @@
 // lib/widgets/sync_dialog.dart
 import 'package:flutter/material.dart';
-import '../services/attendance_sync_service.dart';
+import '../attendance/services/attendance_sync_service.dart';
 
 class _SyncDialog extends StatefulWidget {
   final Map<String, int> stats;

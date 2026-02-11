@@ -5,11 +5,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:image_picker/image_picker.dart';
-import '../../services/attendance_service.dart';
+import '../../attendance/services/attendance_service.dart';
 import '../../auth/services/role_service.dart';
 import '../services/member_performance_service.dart';
-import '../../services/face_recognition_tflite_service.dart';
-import '../../services/biometric_service.dart';
+import '../../attendance/services/face_recognition_tflite_service.dart';
+import '../../attendance/services/biometric_service.dart';
 import '../../services/supabase_storage_service.dart';
 import '../../helpers/timezone_helper.dart';
 import '../../helpers/rfid_mode_helper.dart';
@@ -17,7 +17,7 @@ import '../widgets/petugas_bottom_nav.dart';
 import 'petugas_dashboard.dart';
 import 'petugas_records_page.dart';
 import 'petugas_profile_page.dart';
-import '../../pages/face_registration_page.dart';
+import '../../attendance/screens/face_registration_page.dart';
 
 class PetugasMembersPage extends StatefulWidget {
   final bool isDarkMode;

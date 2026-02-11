@@ -1,10 +1,10 @@
-import 'package:absensimassal/pages/face_registration_page.dart';
+import 'package:absensimassal/attendance/screens/face_registration_page.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
-import '../../services/biometric_service.dart';
+import '../../attendance/services/biometric_service.dart';
 import '../../auth/services/role_service.dart';
 import '../widgets/user_bottom_nav.dart';
 import 'user_profile_page.dart';

@@ -4,11 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
-import '../models/offline_attendance.dart';
-import '../services/offline_database_service.dart';
+import '../../models/offline_attendance.dart';
+import '../../services/offline_database_service.dart';
 import '../services/attendance_sync_service.dart';
-import '../helpers/timezone_helper.dart';
-import '../helpers/sound_helper.dart';
+import '../../helpers/timezone_helper.dart';
+import '../../helpers/sound_helper.dart';
 import 'manual_check_page.dart';
 
 class RfidAttendancePage extends StatefulWidget {

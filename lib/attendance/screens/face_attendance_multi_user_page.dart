@@ -18,15 +18,15 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:intl/intl.dart'; 
 import 'package:path_provider/path_provider.dart'; // ✅ Added for debug path
 import '../services/attendance_service.dart';
-import '../helpers/sound_helper.dart';
-import '../helpers/timezone_helper.dart';
-import '../widgets/mode_confirmation_dialog.dart';
-import '../services/supabase_storage_service.dart';
-import '../services/offline_database_service.dart';
+import '../../helpers/sound_helper.dart';
+import '../../helpers/timezone_helper.dart';
+import '../../widgets/mode_confirmation_dialog.dart';
+import '../../services/supabase_storage_service.dart';
+import '../../services/offline_database_service.dart';
 import '../services/attendance_sync_service.dart';
-import '../models/offline_attendance.dart';
+import '../../models/offline_attendance.dart';
 import 'manual_check_page.dart';
-import '../models/face_tracking_state.dart'; // ✅ NEW: State Machine Enum
+import '../../models/face_tracking_state.dart'; // ✅ NEW: State Machine Enum
 
 class FaceAttendanceMultiUserPage extends StatefulWidget {
   final int organizationId;
