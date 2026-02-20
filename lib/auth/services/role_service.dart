@@ -12,7 +12,7 @@ class RoleService {
       // print('=== FETCHING ORGANIZATION MEMBER WITH ROLE ===');
       // print('User ID: $userId');
 
-      final response = await _supabase
+      final List<dynamic> responseList = await _supabase
           .from('organization_members')
           .select('''
             id,
@@ -30,29 +30,15 @@ class RoleService {
             )
           ''')
           .eq('user_id', userId)
-          .eq('is_active', true)
-          .maybeSingle();
+          .eq('is_active', true);
 
-      if (response == null) {
+      if (responseList.isEmpty) {
         // print('❌ No organization member found');
         return null;
       }
 
-      /*
-      print('✅ Organization Member found:');
-      print('  - ID: ${response['id']}');
-      print('  - Employee ID: ${response['employee_id']}');
-      print('  - Role ID: ${response['role_id']}');
-      
-      if (response['system_roles'] != null) {
-        print('  - Role Code: ${response['system_roles']['code']}');
-        print('  - Role Name: ${response['system_roles']['name']}');
-      } else {
-        print('  ⚠️ WARNING: system_roles is NULL!');
-      }
-      */
-
-      return response;
+      // Return the first one as a fallback, full multi-org should use getAllOrganizationMembersWithRoles
+      return responseList.first;
     } catch (e) {
       debugPrint('!!! ERROR fetching organization member: $e');
       rethrow;
@@ -65,7 +51,7 @@ class RoleService {
       // print('❌ isAdmin: memberData is null');
       return false;
     }
-    
+
     if (memberData['system_roles'] == null) {
       // print('❌ isAdmin: system_roles is null');
       return false;
@@ -73,7 +59,7 @@ class RoleService {
 
     final roleCode = memberData['system_roles']['code'] as String?;
     // print('🔍 isAdmin check: roleCode = $roleCode');
-    
+
     // Admin role codes: A001 (Admin), SA001 (Super Admin)
     final result = roleCode == 'A001' || roleCode == 'SA001';
     // print('   Result: $result');
@@ -86,7 +72,7 @@ class RoleService {
       // print('❌ isPetugas: memberData is null');
       return false;
     }
-    
+
     if (memberData['system_roles'] == null) {
       // print('❌ isPetugas: system_roles is null');
       return false;
@@ -94,7 +80,7 @@ class RoleService {
 
     final roleCode = memberData['system_roles']['code'] as String?;
     // print('🔍 isPetugas check: roleCode = $roleCode');
-    
+
     // Petugas role code: P001
     final result = roleCode == 'P001';
     // print('   Result: $result');
@@ -107,7 +93,7 @@ class RoleService {
       // print('❌ isUser: memberData is null');
       return false;
     }
-    
+
     if (memberData['system_roles'] == null) {
       // print('❌ isUser: system_roles is null');
       return false;
@@ -115,7 +101,7 @@ class RoleService {
 
     final roleCode = memberData['system_roles']['code'] as String?;
     // print('🔍 isUser check: roleCode = $roleCode');
-    
+
     // User role code: US001
     final result = roleCode == 'US001';
     // print('   Result: $result');
@@ -151,6 +137,52 @@ class RoleService {
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
       debugPrint('!!! ERROR fetching roles: $e');
+      return [];
+    }
+  }
+
+  /// Get ALL organization memberships for a user
+  Future<List<Map<String, dynamic>>> getAllOrganizationMembersWithRoles(
+    String userId,
+  ) async {
+    try {
+      final List<dynamic> response = await _supabase
+          .from('organization_members')
+          .select('''
+            id,
+            organization_id,
+            user_id,
+            employee_id,
+            is_active,
+            role_id,
+            organizations!organization_members_organization_id_fkey (
+              id,
+              name,
+              logo_url,
+              address
+            ),
+            system_roles!organization_members_role_id_fkey (
+              id,
+              code,
+              name,
+              description,
+              is_system
+            ),
+            user_profiles!inner(
+              id,
+              display_name,
+              first_name,
+              middle_name,
+              last_name,
+              profile_photo_url
+            )
+          ''')
+          .eq('user_id', userId)
+          .eq('is_active', true);
+
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      debugPrint('!!! ERROR fetching all organization memberships: $e');
       return [];
     }
   }

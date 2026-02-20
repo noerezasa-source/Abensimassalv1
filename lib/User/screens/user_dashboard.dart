@@ -8,66 +8,373 @@ import '../../attendance/services/biometric_service.dart';
 import '../../auth/services/role_service.dart';
 import '../widgets/user_bottom_nav.dart';
 import 'user_profile_page.dart';
+import '../../auth/screens/join_organization_screen.dart'; // ✅ Added for Join Organization option
+import 'dart:async'; // ✅ Added for Clock Timer
+import 'package:absensimassal/Petugas/screens/petugas_dashboard.dart';
+import '../../helpers/timezone_helper.dart';
+import '../../Petugas/screens/selfie_attendance_flow_page.dart';
+import '../../helpers/language_helper.dart';
 
 class UserDashboardPage extends StatefulWidget {
   final int organizationMemberId;
   final Map<String, dynamic> memberData;
+  final bool isDarkMode;
 
   const UserDashboardPage({
     super.key,
     required this.organizationMemberId,
     required this.memberData,
+    this.isDarkMode = false,
   });
 
   @override
   State<UserDashboardPage> createState() => _UserDashboardPageState();
 }
 
-class _UserDashboardPageState extends State<UserDashboardPage> with SingleTickerProviderStateMixin {
+class _UserDashboardPageState extends State<UserDashboardPage>
+    with SingleTickerProviderStateMixin {
   final BiometricService _biometricService = BiometricService();
   final RoleService _roleService = RoleService();
   final _supabase = Supabase.instance.client;
 
   bool _hasRegisteredFace = false;
-  bool _isCheckingFace = true;
-  bool _isLoadingProfile = true;
-  bool _isLoadingStats = true;
+  bool _isCheckingFace = false;
   bool _isLoadingAttendance = true;
   String? _errorMessage;
   Map<String, dynamic>? _userProfile;
-  Map<String, dynamic>? _attendanceStats;
-  
+  bool _isDarkMode = false;
+
   // Calendar & Daily Events
   DateTime _focusedDay = DateTime.now();
   DateTime _selectedDay = DateTime.now();
   CalendarFormat _calendarFormat = CalendarFormat.month;
   Map<DateTime, List<Map<String, dynamic>>> _attendanceByDate = {};
+  List<Map<String, dynamic>> _recentActivities = [];
+  bool _isLoadingActivities = true;
+  bool _isLoadingWeeklyData = true;
+  double _totalWeeklyHours = 0.0;
+  double _weeklyPercentageChange = 0.0;
+  List<double> _dailyHours = [0.0, 0.0, 0.0, 0.0, 0.0];
   late TabController _tabController;
+
+  // Real-time updates
+  Timer? _clockTimer;
+  String _organizationTimezone = 'Asia/Jakarta';
+  Map<String, dynamic>? _organization;
+  DateTime _nowUtc = DateTime.now().toUtc();
 
   @override
   void initState() {
     super.initState();
+    _isDarkMode = widget.isDarkMode;
     _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (_tabController.indexIsChanging) {
+        setState(() {});
+      }
+    });
     // print('=== USER DASHBOARD INIT ===');
     // print('Organization Member ID: ${widget.organizationMemberId}');
     // print('Role: ${_roleService.getRoleName(widget.memberData)}');
     _loadUserProfile();
     _checkFaceRegistration();
-    _loadAttendanceStats();
-    _loadAttendanceData();
+    _loadWeeklyOverview();
+    _loadAttendanceData(_focusedDay);
+    _loadRecentActivities();
+    _loadOrganizationTimezone();
+    _loadOrganizationInfo();
+    _initRealTimeClock();
+  }
+
+  void _initRealTimeClock() {
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted) {
+        setState(() {
+          _nowUtc = DateTime.now().toUtc();
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _clockTimer?.cancel();
     super.dispose();
   }
 
-  Future<void> _loadUserProfile() async {
-    setState(() {
-      _isLoadingProfile = true;
-    });
+  Future<void> _loadOrganizationInfo() async {
+    final organizationId = widget.memberData['organization_id'] as int?;
+    if (organizationId == null) return;
 
+    try {
+      final org = await _supabase
+          .from('organizations')
+          .select('id, name, logo_url')
+          .eq('id', organizationId)
+          .maybeSingle();
+
+      if (org != null) {
+        setState(() {
+          _organization = org;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading organization info: $e');
+    }
+  }
+
+  Future<void> _loadOrganizationTimezone() async {
+    final organizationId = widget.memberData['organization_id'] as int?;
+    if (organizationId == null) return;
+
+    try {
+      final org = await _supabase
+          .from('organizations')
+          .select('timezone')
+          .eq('id', organizationId)
+          .maybeSingle();
+
+      if (org != null && org['timezone'] != null) {
+        setState(() {
+          _organizationTimezone = org['timezone'] as String;
+        });
+        debugPrint('Organization timezone: $_organizationTimezone');
+      }
+    } catch (e) {
+      debugPrint('Error loading organization timezone: $e');
+    }
+  }
+
+  void _showOrganizationSwitcher() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => _buildOrganizationSwitcherSheet(),
+    ).then((selectedMembership) {
+      if (selectedMembership != null &&
+          selectedMembership is Map<String, dynamic>) {
+        // Double check if it's the SAME organization
+        if (selectedMembership['id'] == widget.organizationMemberId) {
+          debugPrint('Already on this organization dashboard');
+          return;
+        }
+
+        // Navigate based on role
+        if (_roleService.isPetugas(selectedMembership)) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (context) => PetugasDashboardPage(
+                organizationMemberId: selectedMembership['id'] as int,
+                memberData: selectedMembership,
+                isDarkMode: _isDarkMode,
+              ),
+            ),
+            (route) => false,
+          );
+        } else {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (context) => UserDashboardPage(
+                organizationMemberId: selectedMembership['id'] as int,
+                memberData: selectedMembership,
+                isDarkMode: _isDarkMode,
+              ),
+            ),
+            (route) => false,
+          );
+        }
+      }
+    });
+  }
+
+  Widget _buildOrganizationSwitcherSheet() {
+    return Container(
+      decoration: BoxDecoration(
+        color: _isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(28),
+          topRight: Radius.circular(28),
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.grey.shade300,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                AppLanguage.tr('switch_organization'),
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: _isDarkMode ? Colors.white : const Color(0xFF1F2937),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          FutureBuilder<List<Map<String, dynamic>>>(
+            future: _roleService.getAllOrganizationMembersWithRoles(
+              _supabase.auth.currentUser!.id,
+            ),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              final memberships = snapshot.data ?? [];
+
+              return Column(
+                children: [
+                  ...memberships.map((membership) {
+                    final organization = membership['organizations'];
+                    final roleName = _roleService.getRoleName(membership);
+                    final isActive =
+                        membership['id'] == widget.organizationMemberId;
+
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: InkWell(
+                        onTap: () => Navigator.pop(context, membership),
+                        borderRadius: BorderRadius.circular(16),
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: isActive
+                                ? (_isDarkMode
+                                      ? const Color(0xFFD0BCFF).withOpacity(0.1)
+                                      : const Color(
+                                          0xFF4A1E79,
+                                        ).withOpacity(0.05))
+                                : (_isDarkMode
+                                      ? Colors.white.withValues(alpha: 0.05)
+                                      : Colors.white),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: isActive
+                                  ? (_isDarkMode
+                                        ? const Color(0xFFD0BCFF)
+                                        : const Color(0xFF4A1E79))
+                                  : (_isDarkMode
+                                        ? Colors.white10
+                                        : Colors.grey.shade200),
+                              width: isActive ? 2 : 1,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  color: isActive
+                                      ? (_isDarkMode
+                                            ? const Color(0xFFD0BCFF)
+                                            : const Color(0xFF4A1E79))
+                                      : (_isDarkMode
+                                            ? Colors.white10
+                                            : Colors.grey.shade100),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Center(
+                                  child: Icon(
+                                    Icons.business,
+                                    color: Colors.white,
+                                    size: 22,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      organization['name'] ?? 'Unknown Org',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: _isDarkMode
+                                            ? Colors.white
+                                            : const Color(0xFF1F2937),
+                                      ),
+                                    ),
+                                    Text(
+                                      roleName.toUpperCase(),
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey.shade500,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (isActive)
+                                const Icon(
+                                  Icons.check_circle,
+                                  color: Color(0xFF4A1E79),
+                                  size: 24,
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                  const Divider(height: 32),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context); // Close switcher
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const JoinOrganizationScreen(
+                              fromDashboard: true,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.add_business_rounded),
+                      label: Text(AppLanguage.tr('join_new_organization')),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF4A1E79),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        elevation: 0,
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _loadUserProfile() async {
     try {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) {
@@ -83,122 +390,170 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
       if (mounted) {
         setState(() {
           _userProfile = response;
-          _isLoadingProfile = false;
         });
       }
     } catch (e) {
       debugPrint('!!! ERROR loading user profile: $e');
       if (mounted) {
         setState(() {
-          _isLoadingProfile = false;
           _errorMessage = 'Failed to load profile: $e';
         });
       }
     }
   }
 
-  Future<void> _loadAttendanceStats() async {
-  setState(() {
-    _isLoadingStats = true;
-  });
+  Future<void> _loadRecentActivities() async {
+    if (!mounted) return;
+    setState(() => _isLoadingActivities = true);
 
-  try {
-    final now = DateTime.now();
-    final firstDayOfMonth = DateTime(now.year, now.month, 1);
-    final lastDayOfMonth = DateTime(now.year, now.month + 1, 0);
+    try {
+      final response = await _supabase
+          .from('attendance_logs')
+          .select('''
+            id,
+            event_type,
+            event_time,
+            method,
+            raw_data,
+            location,
+            attendance_records(
+              status
+            )
+          ''')
+          .eq('organization_member_id', widget.organizationMemberId)
+          .order('event_time', ascending: false)
+          .limit(20);
 
-    // Get attendance records for current month - FILTER HANYA FACE RECOGNITION KIOSK
-    final records = await _supabase
-        .from('attendance_records')
-        .select()
-        .eq('organization_member_id', widget.organizationMemberId)
-        .eq('check_in_method', 'face_recognition_kiosk')
-        .gte('attendance_date', firstDayOfMonth.toIso8601String().split('T')[0])
-        .lte('attendance_date', lastDayOfMonth.toIso8601String().split('T')[0]);
+      if (mounted) {
+        final groupedActivities = <String, Map<String, dynamic>>{};
 
-    int presentDays = 0;
-    int lateDays = 0;
-    int totalWorkMinutes = 0;
+        for (final log in response) {
+          final eventTimeStr = log['event_time'] as String;
+          final eventTime = TimezoneHelper.parseAndConvert(
+            eventTimeStr,
+            _organizationTimezone,
+          );
+          if (eventTime == null) continue;
 
-    for (var record in records) {
-      // HITUNG PRESENT: Jika ada actual_check_in DAN status = 'present' atau 'late'
-      if (record['actual_check_in'] != null) {
-        final status = record['status']?.toString().toLowerCase();
-        
-        // Present jika ada check_in (termasuk yang late)
-        if (status == 'present' || status == 'late') {
-          presentDays++;
+          final dateKey = eventTime.toIso8601String().split('T').first;
+
+          final recordsData = log['attendance_records'];
+          final record = recordsData is List
+              ? (recordsData.isNotEmpty
+                    ? recordsData[0] as Map<String, dynamic>
+                    : {})
+              : (recordsData as Map<String, dynamic>? ?? {});
+
+          final rawData = log['raw_data'] as Map<String, dynamic>? ?? {};
+
+          // Safe parsing for photo_url from location string or Map
+          Map<String, dynamic> parsedLocation = {};
+          try {
+            if (log['location'] is Map) {
+              parsedLocation = log['location'] as Map<String, dynamic>;
+            } else if (log['location'] is String) {
+              final decoded = Uri.decodeFull(log['location']);
+              if (decoded.startsWith('{')) {
+                // If it's a JSON string, try to extract photo_url if possible without full JSON parser
+                // (Usually Supabase handles it if selected correctly, but as fallback:)
+                if (decoded.contains('"photo_url"')) {
+                  final start = decoded.indexOf('"photo_url"') + 12;
+                  final end = decoded.indexOf('"', start + 1);
+                  if (start > 12 && end > start) {
+                    parsedLocation['photo_url'] = decoded.substring(
+                      start + 1,
+                      end,
+                    );
+                  }
+                }
+              }
+            }
+          } catch (_) {}
+
+          final entry = groupedActivities.putIfAbsent(dateKey, () {
+            return {
+              'date': dateKey,
+              'checkInTime': null,
+              'checkOutTime': null,
+              'checkInMethod': null,
+              'checkOutMethod': null,
+              'checkInPhoto': null,
+              'checkOutPhoto': null,
+              'status': record['status'],
+              'shiftName': rawData['work_time_mode']?.toString(),
+              'lastUpdated': eventTime,
+            };
+          });
+
+          final photoUrl = parsedLocation['photo_url']?.toString();
+
+          if (log['event_type'] == 'check_in') {
+            entry['checkInTime'] = eventTime;
+            entry['checkInMethod'] = log['method'];
+            entry['checkInPhoto'] = photoUrl;
+          } else if (log['event_type'] == 'check_out') {
+            entry['checkOutTime'] ??= eventTime;
+            entry['checkOutMethod'] = log['method'];
+            entry['checkOutPhoto'] = photoUrl;
+          }
+
+          if (eventTime.isAfter(entry['lastUpdated'] as DateTime)) {
+            entry['lastUpdated'] = eventTime;
+          }
         }
+
+        final sortedActivities = groupedActivities.values.toList()
+          ..sort(
+            (a, b) => (b['lastUpdated'] as DateTime).compareTo(
+              a['lastUpdated'] as DateTime,
+            ),
+          );
+
+        setState(() {
+          _recentActivities = sortedActivities.take(5).toList();
+          _isLoadingActivities = false;
+        });
       }
-
-      // HITUNG LATE: Jika late_minutes > 0
-      if (record['late_minutes'] != null && record['late_minutes'] > 0) {
-        lateDays++;
+    } catch (e) {
+      debugPrint('!!! ERROR loading recent activities: $e');
+      if (mounted) {
+        setState(() => _isLoadingActivities = false);
       }
-
-      // HITUNG WORK HOURS: Dari work_duration_minutes
-      if (record['work_duration_minutes'] != null) {
-        totalWorkMinutes += (record['work_duration_minutes'] as int);
-      }
-    }
-
-    // Konversi minutes ke hours dengan 1 desimal
-    final workHours = (totalWorkMinutes / 60).toStringAsFixed(1);
-
-    if (mounted) {
-      setState(() {
-        _attendanceStats = {
-          'present_days': presentDays,
-          'late_days': lateDays,
-          'work_hours': workHours,
-          'total_records': records.length,
-        };
-        _isLoadingStats = false;
-      });
-      
-      /*
-      // Debug print untuk memastikan
-      print('=== ATTENDANCE STATS ===');
-      print('Total Records: ${records.length}');
-      print('Present Days: $presentDays');
-      print('Late Days: $lateDays');
-      print('Work Hours: $workHours');
-      */
-    }
-  } catch (e) {
-    debugPrint('!!! ERROR loading attendance stats: $e');
-    if (mounted) {
-      setState(() {
-        _attendanceStats = {
-          'present_days': 0,
-          'late_days': 0,
-          'work_hours': '0.0',
-          'total_records': 0,
-        };
-        _isLoadingStats = false;
-      });
     }
   }
-}
 
-  Future<void> _loadAttendanceData() async {
+  Future<void> _loadAttendanceData(DateTime focusedMonth) async {
     setState(() {
       _isLoadingAttendance = true;
     });
 
     try {
-      final now = DateTime.now();
-      final firstDayOfMonth = DateTime(now.year, now.month, 1);
-      final lastDayOfMonth = DateTime(now.year, now.month + 1, 0);
+      final firstDayOfMonth = DateTime(
+        focusedMonth.year,
+        focusedMonth.month,
+        1,
+      );
+      final lastDayOfMonth = DateTime(
+        focusedMonth.year,
+        focusedMonth.month + 1,
+        0,
+      );
 
-      // Load attendance records untuk calendar
+      // Load attendance records untuk calendar - REMOVED check_in_method filter to show all
       final records = await _supabase
           .from('attendance_records')
-          .select()
+          .select(
+            'id, attendance_date, status, actual_check_in, actual_check_out, check_in_photo_url, check_in_location, check_in_method, check_out_photo_url, check_out_location, check_out_method, late_minutes, work_duration_minutes',
+          )
           .eq('organization_member_id', widget.organizationMemberId)
-          .eq('check_in_method', 'face_recognition_kiosk')
-          .gte('attendance_date', firstDayOfMonth.toIso8601String().split('T')[0])
-          .lte('attendance_date', lastDayOfMonth.toIso8601String().split('T')[0])
+          .gte(
+            'attendance_date',
+            firstDayOfMonth.toIso8601String().split('T')[0],
+          )
+          .lte(
+            'attendance_date',
+            lastDayOfMonth.toIso8601String().split('T')[0],
+          )
           .order('attendance_date', ascending: false);
 
       if (mounted) {
@@ -209,10 +564,9 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
       }
     } catch (e) {
       debugPrint('!!! ERROR loading attendance data: $e');
+    } finally {
       if (mounted) {
-        setState(() {
-          _isLoadingAttendance = false;
-        });
+        setState(() {});
       }
     }
   }
@@ -223,7 +577,11 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
     for (var record in records) {
       try {
         final attendanceDate = DateTime.parse(record['attendance_date']);
-        final dateOnly = DateTime(attendanceDate.year, attendanceDate.month, attendanceDate.day);
+        final dateOnly = DateTime(
+          attendanceDate.year,
+          attendanceDate.month,
+          attendanceDate.day,
+        );
 
         groupedData[dateOnly] ??= [];
 
@@ -271,21 +629,131 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
     });
   }
 
+  Future<void> _loadWeeklyOverview() async {
+    if (!mounted) return;
+
+    setState(() {
+      _isLoadingWeeklyData = true;
+    });
+
+    try {
+      // Get current week (Monday to Friday)
+      final now = DateTime.now();
+      final currentWeekday = now.weekday; // 1 = Monday, 7 = Sunday
+
+      // Calculate Monday of current week
+      final monday = now.subtract(Duration(days: currentWeekday - 1));
+      final mondayStr = monday.toIso8601String().split('T')[0];
+
+      // Calculate Friday of current week
+      final friday = monday.add(const Duration(days: 4));
+      final fridayStr = friday.toIso8601String().split('T')[0];
+
+      // Get last week's Monday and Friday for comparison
+      final lastMonday = monday.subtract(const Duration(days: 7));
+      final lastMondayStr = lastMonday.toIso8601String().split('T')[0];
+      final lastFriday = lastMonday.add(const Duration(days: 4));
+      final lastFridayStr = lastFriday.toIso8601String().split('T')[0];
+
+      // Fetch current week's attendance records for THIS MEMBER
+      final currentWeekRecords = await _supabase
+          .from('attendance_records')
+          .select('attendance_date, work_duration_minutes')
+          .eq('organization_member_id', widget.organizationMemberId)
+          .gte('attendance_date', mondayStr)
+          .lte('attendance_date', fridayStr);
+
+      // Fetch last week's attendance records for THIS MEMBER
+      final lastWeekRecords = await _supabase
+          .from('attendance_records')
+          .select('work_duration_minutes')
+          .eq('organization_member_id', widget.organizationMemberId)
+          .gte('attendance_date', lastMondayStr)
+          .lte('attendance_date', lastFridayStr);
+
+      // Calculate daily hours for current week
+      final dailyHoursMap = <int, double>{
+        1: 0.0, // Monday
+        2: 0.0, // Tuesday
+        3: 0.0, // Wednesday
+        4: 0.0, // Thursday
+        5: 0.0, // Friday
+      };
+
+      double totalMinutes = 0.0;
+      for (final record in currentWeekRecords as List) {
+        final dateStr = record['attendance_date'] as String?;
+        final minutes = record['work_duration_minutes'] as int?;
+
+        if (dateStr != null && minutes != null && minutes > 0) {
+          final date = DateTime.parse(dateStr);
+          final weekday = date.weekday;
+
+          if (weekday >= 1 && weekday <= 5) {
+            dailyHoursMap[weekday] =
+                (dailyHoursMap[weekday] ?? 0.0) + (minutes / 60.0);
+            totalMinutes += minutes;
+          }
+        }
+      }
+
+      // Calculate last week's total
+      double lastWeekMinutes = 0.0;
+      for (final record in lastWeekRecords as List) {
+        final minutes = record['work_duration_minutes'] as int?;
+        if (minutes != null && minutes > 0) {
+          lastWeekMinutes += minutes;
+        }
+      }
+
+      // Calculate percentage change
+      double percentageChange = 0.0;
+      if (lastWeekMinutes > 0) {
+        percentageChange =
+            ((totalMinutes - lastWeekMinutes) / lastWeekMinutes) * 100;
+      } else if (totalMinutes > 0) {
+        percentageChange = 100.0;
+      }
+
+      if (mounted) {
+        setState(() {
+          _totalWeeklyHours = totalMinutes / 60.0;
+          _weeklyPercentageChange = percentageChange;
+          _dailyHours = [
+            dailyHoursMap[1]!,
+            dailyHoursMap[2]!,
+            dailyHoursMap[3]!,
+            dailyHoursMap[4]!,
+            dailyHoursMap[5]!,
+          ];
+          _isLoadingWeeklyData = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('!!! ERROR loading weekly overview: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingWeeklyData = false;
+        });
+      }
+    }
+  }
+
   Future<void> _checkFaceRegistration() async {
     setState(() {
       _isCheckingFace = true;
       _errorMessage = null;
     });
-    
+
     try {
       // print('=== CHECKING FACE REGISTRATION ===');
-      
+
       final hasRegistered = await _biometricService.hasRegisteredFace(
         widget.organizationMemberId,
       );
-      
+
       // print('Face registration check result: $hasRegistered');
-      
+
       if (mounted) {
         setState(() {
           _hasRegisteredFace = hasRegistered;
@@ -327,16 +795,45 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
           organizationMemberId: widget.organizationMemberId,
           memberData: widget.memberData,
           userProfile: _userProfile,
+          isDarkMode: _isDarkMode,
         ),
       ),
     );
   }
 
+  Future<void> _handleSelfieAttendance() async {
+    final organizationId = widget.memberData['organization_id'] as int?;
+    if (organizationId == null) return;
+
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SelfieAttendanceFlowPage(
+          organizationId: organizationId,
+          organizationName: _organization?['name'] ?? 'Organization',
+          petugasData: widget.memberData,
+          isSelfAttendance: true,
+        ),
+      ),
+    );
+
+    if (result != null && result['success'] == true) {
+      await Future.wait([
+        _loadAttendanceData(_focusedDay),
+        _loadRecentActivities(),
+      ]);
+    }
+  }
+
   String _getCurrentDate() {
-    final now = DateTime.now();
-    final weekday = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][now.weekday - 1];
-    final month = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][now.month - 1];
-    return '$weekday, ${now.day} $month ${now.year}';
+    final nowOrg = TimezoneHelper.convertUtcToOrgTimezone(
+      _nowUtc,
+      _organizationTimezone,
+    );
+    return DateFormat(
+      'EEEE, dd MMM yyyy',
+      AppLanguage.currentLanguage == 'id' ? 'id_ID' : 'en_US',
+    ).format(nowOrg);
   }
 
   String _getFullName() {
@@ -344,7 +841,7 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
     final firstName = _userProfile!['first_name'] ?? '';
     final middleName = _userProfile!['middle_name'] ?? '';
     final lastName = _userProfile!['last_name'] ?? '';
-    
+
     if (middleName.isNotEmpty) {
       return '$firstName $middleName $lastName'.trim();
     }
@@ -355,17 +852,17 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
     if (_userProfile == null || _userProfile!['profile_photo_url'] == null) {
       return null;
     }
-    
+
     final photoPath = _userProfile!['profile_photo_url'] as String;
-    
+
     if (photoPath.trim().isEmpty) {
       return null;
     }
-    
+
     if (photoPath.startsWith('http://') || photoPath.startsWith('https://')) {
       return photoPath;
     }
-    
+
     return _supabase.storage
         .from('profile-photos')
         .getPublicUrl('mass-profile/$photoPath');
@@ -377,13 +874,17 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
   }
 
   List<Map<String, dynamic>> _getSelectedDayEvents() {
-    final dateOnly = DateTime(_selectedDay.year, _selectedDay.month, _selectedDay.day);
+    final dateOnly = DateTime(
+      _selectedDay.year,
+      _selectedDay.month,
+      _selectedDay.day,
+    );
     return _attendanceByDate[dateOnly] ?? [];
   }
 
   void _onDaySelected(DateTime selectedDay, DateTime focusedDay) {
     if (!mounted) return;
-    
+
     setState(() {
       _selectedDay = selectedDay;
       _focusedDay = focusedDay;
@@ -415,19 +916,71 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
   String _getEventLabel(String type) {
     switch (type) {
       case 'check_in':
-        return 'Check In';
+        return AppLanguage.tr('User.dashboard.check_in');
       case 'check_out':
-        return 'Check Out';
+        return AppLanguage.tr('User.dashboard.check_out');
       default:
         return type.replaceAll('_', ' ').toUpperCase();
     }
   }
 
+  String _formatEventTime(DateTime? time) {
+    if (time == null) return 'Unknown time';
+
+    final nowUtc = DateTime.now().toUtc();
+    final nowOrg =
+        TimezoneHelper.parseAndConvert(
+          nowUtc.toIso8601String(),
+          _organizationTimezone,
+        ) ??
+        nowUtc;
+
+    final isToday =
+        nowOrg.year == time.year &&
+        nowOrg.month == time.month &&
+        nowOrg.day == time.day;
+
+    final hour = time.hour.toString().padLeft(2, '0');
+    final minute = time.minute.toString().padLeft(2, '0');
+    final timeStr = '$hour:$minute';
+
+    if (isToday) {
+      return '${AppLanguage.tr('User.dashboard.today')} • $timeStr';
+    }
+
+    final dateStr = '${time.day}/${time.month}/${time.year}';
+    return '$dateStr • $timeStr';
+  }
+
+  String _formatShortTime(DateTime? time) {
+    if (time == null) return '--:--';
+    final hour = time.hour.toString().padLeft(2, '0');
+    final minute = time.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
+  IconData _getMethodIcon(dynamic method) {
+    final m = method?.toString().toLowerCase() ?? '';
+    if (m.contains('face')) return Icons.face_rounded;
+    if (m.contains('rfid')) return Icons.contactless_rounded;
+    if (m.contains('selfie')) return Icons.camera_alt_rounded;
+    return Icons.devices_rounded;
+  }
+
+  String _formatMethodName(dynamic method) {
+    final m = method?.toString().split('_').last.toUpperCase() ?? 'AUTO';
+    return m;
+  }
+
   String _formatTime(String? dateTimeStr) {
     if (dateTimeStr == null) return '--:--';
     try {
-      final dateTime = DateTime.parse(dateTimeStr);
-      return DateFormat('HH:mm:ss').format(dateTime);
+      final convertedTime = TimezoneHelper.parseAndConvert(
+        dateTimeStr,
+        _organizationTimezone,
+      );
+      if (convertedTime == null) return '--:--';
+      return DateFormat('HH:mm').format(convertedTime);
     } catch (e) {
       return '--:--';
     }
@@ -440,7 +993,7 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
       context: context,
       builder: (BuildContext context) {
         final eventTime = DateTime.parse(event['event_time']);
-        
+
         return Dialog(
           backgroundColor: Colors.transparent,
           child: Container(
@@ -452,8 +1005,12 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
               child: Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: _isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
                   borderRadius: BorderRadius.circular(24),
+                  border: Border.all(
+                    color: _isDarkMode ? Colors.white10 : Colors.transparent,
+                    width: 1,
+                  ),
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -463,7 +1020,9 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: _getEventColor(event['type']).withOpacity(0.1),
+                            color: _getEventColor(
+                              event['type'],
+                            ).withOpacity(0.1),
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Icon(
@@ -476,22 +1035,31 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
                         Expanded(
                           child: Text(
                             _getEventLabel(event['type']),
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 20,
                               fontWeight: FontWeight.bold,
+                              color: _isDarkMode
+                                  ? Colors.white
+                                  : Colors.black87,
                             ),
                           ),
                         ),
                         IconButton(
                           onPressed: () => Navigator.pop(context),
-                          icon: Icon(Icons.close, color: Colors.grey.shade600),
+                          icon: Icon(
+                            Icons.close,
+                            color: _isDarkMode
+                                ? Colors.white70
+                                : Colors.grey.shade600,
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 20),
                     if (event['photo_url'] != null) ...[
                       GestureDetector(
-                        onTap: () => _showFullImage(context, event['photo_url']),
+                        onTap: () =>
+                            _showFullImage(context, event['photo_url']),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(16),
                           child: CachedNetworkImage(
@@ -502,14 +1070,26 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
                             placeholder: (context, url) => Container(
                               width: double.infinity,
                               height: 220,
-                              color: Colors.grey[200],
-                              child: const Center(child: CircularProgressIndicator()),
+                              color: _isDarkMode
+                                  ? Colors.white.withOpacity(0.05)
+                                  : Colors.grey[200],
+                              child: const Center(
+                                child: CircularProgressIndicator(),
+                              ),
                             ),
                             errorWidget: (context, url, error) => Container(
                               width: double.infinity,
                               height: 220,
-                              color: Colors.grey[200],
-                              child: const Icon(Icons.error),
+                              color: _isDarkMode
+                                  ? Colors.white.withOpacity(0.05)
+                                  : Colors.grey[200],
+                              child: Icon(
+                                Icons.error_outline,
+                                color: _isDarkMode
+                                    ? Colors.white54
+                                    : Colors.grey.shade400,
+                                size: 40,
+                              ),
                             ),
                           ),
                         ),
@@ -519,10 +1099,14 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF4A90E2).withOpacity(0.05),
+                        color: _isDarkMode
+                            ? Colors.white.withOpacity(0.03)
+                            : const Color(0xFF4A1E79).withOpacity(0.05),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: const Color(0xFF4A90E2).withOpacity(0.1),
+                          color: _isDarkMode
+                              ? Colors.white10
+                              : const Color(0xFF4A1E79).withOpacity(0.1),
                           width: 1,
                         ),
                       ),
@@ -530,25 +1114,28 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
                         children: [
                           _buildDetailRow(
                             Icons.calendar_today,
-                            'Date',
+                            AppLanguage.tr('User.dashboard.detail_date'),
                             DateFormat('EEEE, d MMM yyyy').format(eventTime),
                           ),
                           _buildDetailRow(
                             Icons.access_time,
-                            'Time',
+                            AppLanguage.tr('User.dashboard.detail_time'),
                             DateFormat('HH:mm:ss').format(eventTime),
                           ),
-                          if (event['late_minutes'] != null && event['late_minutes'] > 0)
+                          if (event['late_minutes'] != null &&
+                              event['late_minutes'] > 0)
                             _buildDetailRow(
                               Icons.schedule,
-                              'Late',
-                              '${event['late_minutes']} minutes',
+                              AppLanguage.tr('User.dashboard.detail_late'),
+                              '${event['late_minutes']} ${AppLanguage.tr('User.dashboard.detail_minutes')}',
                             ),
                           if (event['work_duration_minutes'] != null)
                             _buildDetailRow(
                               Icons.work,
-                              'Work Duration',
-                              '${(event['work_duration_minutes'] / 60).toStringAsFixed(1)} hours',
+                              AppLanguage.tr(
+                                'User.dashboard.detail_work_duration',
+                              ),
+                              '${(event['work_duration_minutes'] / 60).toStringAsFixed(1)} ${AppLanguage.tr('User.dashboard.detail_hours')}',
                             ),
                         ],
                       ),
@@ -575,9 +1162,10 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
                 child: CachedNetworkImage(
                   imageUrl: photoUrl,
                   fit: BoxFit.contain,
-                  placeholder: (context, url) => const CircularProgressIndicator(
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                  ),
+                  placeholder: (context, url) =>
+                      const CircularProgressIndicator(
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
                   errorWidget: (context, error, stackTrace) {
                     return const Center(
                       child: Icon(Icons.error, color: Colors.white, size: 50),
@@ -592,9 +1180,7 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
               child: IconButton(
                 onPressed: () => Navigator.pop(context),
                 icon: const Icon(Icons.close, color: Colors.white, size: 28),
-                style: IconButton.styleFrom(
-                  backgroundColor: Colors.black45,
-                ),
+                style: IconButton.styleFrom(backgroundColor: Colors.black45),
               ),
             ),
           ],
@@ -609,7 +1195,7 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 16, color: const Color(0xFF4A90E2)),
+          Icon(icon, size: 16, color: const Color(0xFF4A1E79)),
           const SizedBox(width: 10),
           Expanded(
             child: RichText(
@@ -632,496 +1218,1256 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
 
   @override
   Widget build(BuildContext context) {
+    final nowOrg = TimezoneHelper.convertUtcToOrgTimezone(
+      _nowUtc,
+      _organizationTimezone,
+    );
+    final hourFormat = nowOrg.hour.toString().padLeft(2, '0');
+    final minuteFormat = nowOrg.minute.toString().padLeft(2, '0');
+    final currentTime = '$hourFormat:$minuteFormat';
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: _isDarkMode
+          ? const Color(0xFF1F0B38)
+          : const Color(0xFFF5F5F5),
       body: RefreshIndicator(
         onRefresh: () async {
           await Future.wait([
             _loadUserProfile(),
             _checkFaceRegistration(),
-            _loadAttendanceStats(),
-            _loadAttendanceData(),
+            _loadWeeklyOverview(),
+            _loadAttendanceData(_focusedDay),
+            _loadRecentActivities(),
           ]);
         },
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           child: Column(
             children: [
-              // ---------- HEADER CARD ----------
+              // ---------- HEADER SECTION ----------
               Container(
-                decoration: const BoxDecoration(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(8, 8, 12, 32),
+                decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [Color(0xFF4A90E2), Color(0xFF5BA3F5)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(30),
-                    bottomRight: Radius.circular(30),
+                    colors: _isDarkMode
+                        ? [const Color(0xFF2D1B4E), const Color(0xFF1F0B38)]
+                        : [const Color(0xFF8938DF), const Color(0xFF4A1E79)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
                   ),
                 ),
-                padding: const EdgeInsets.fromLTRB(20, 50, 20, 30),
                 child: Column(
                   children: [
-                    // Top bar
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.3),
-                            borderRadius: BorderRadius.circular(10),
+                    // Logo and Action Row
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Transform.translate(
+                            offset: const Offset(-16, -16),
+                            child: Image.asset(
+                              'assets/logo/app_logo.png',
+                              width: 180,
+                              height: 180,
+                              fit: BoxFit.contain,
+                              errorBuilder: (context, error, stackTrace) =>
+                                  const SizedBox.shrink(),
+                            ),
                           ),
-                          child: const Icon(
-                            Icons.calendar_today,
-                            color: Colors.white,
-                            size: 20,
-                          ),
-                        ),
-                        Text(
-                          _getCurrentDate(),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.3),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Icon(
-                            Icons.notifications,
-                            color: Colors.white,
-                            size: 20,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    // Profile Card
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 15,
-                            offset: const Offset(0, 5),
+                          Transform.translate(
+                            offset: const Offset(0, -16),
+                            child: IconButton(
+                              icon: Icon(
+                                _isDarkMode
+                                    ? Icons.light_mode_rounded
+                                    : Icons.dark_mode_outlined,
+                                color: Colors.white,
+                                size: 26,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _isDarkMode = !_isDarkMode;
+                                });
+                              },
+                            ),
                           ),
                         ],
                       ),
-                      child: _isLoadingProfile
-                          ? const Center(
-                              child: Padding(
-                                padding: EdgeInsets.all(20.0),
-                                child: CircularProgressIndicator(),
+                    ),
+                    // Profile Section
+                    Transform.translate(
+                      offset: const Offset(0, -70),
+                      child: Column(
+                        children: [
+                          // Profile Photo
+                          GestureDetector(
+                            onTap: _navigateToProfile,
+                            child: Container(
+                              width: 110,
+                              height: 110,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: LinearGradient(
+                                  colors: _isDarkMode
+                                      ? [
+                                          const Color(0xFFD0BCFF),
+                                          const Color(0xFF8938DF),
+                                        ]
+                                      : [
+                                          const Color(0xFF8938DF),
+                                          const Color(0xFF4A1E79),
+                                        ],
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.2),
+                                    blurRadius: 15,
+                                    offset: const Offset(0, 8),
+                                  ),
+                                ],
                               ),
-                            )
-                          : Row(
-                              children: [
-                                // Profile Image
-                                Container(
-                                  width: 60,
-                                  height: 60,
+                              child: ClipOval(
+                                child: Container(
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
                                     border: Border.all(
-                                      color: const Color(0xFF4A90E2),
-                                      width: 2,
+                                      color: Colors.white,
+                                      width: 3,
                                     ),
-                                    color: Colors.grey.shade100,
                                   ),
-                                  child: ClipOval(
-                                    child: _getProfilePhotoUrl() != null
-                                        ? Image.network(
-                                            _getProfilePhotoUrl()!,
-                                            fit: BoxFit.cover,
-                                            errorBuilder: (context, error, stackTrace) {
-                                              return Icon(
-                                                Icons.person,
-                                                size: 30,
-                                                color: Colors.grey.shade400,
-                                              );
-                                            },
-                                            loadingBuilder: (context, child, loadingProgress) {
-                                              if (loadingProgress == null) return child;
-                                              return Center(
-                                                child: CircularProgressIndicator(
-                                                  value: loadingProgress.expectedTotalBytes != null
-                                                      ? loadingProgress.cumulativeBytesLoaded /
-                                                          loadingProgress.expectedTotalBytes!
-                                                      : null,
-                                                  strokeWidth: 2,
-                                                ),
-                                              );
-                                            },
-                                          )
-                                        : Icon(
-                                            Icons.person,
-                                            size: 30,
-                                            color: Colors.grey.shade400,
-                                          ),
+                                  child: _getProfilePhotoUrl() != null
+                                      ? Image.network(
+                                          _getProfilePhotoUrl()!,
+                                          fit: BoxFit.cover,
+                                          errorBuilder:
+                                              (context, error, stackTrace) =>
+                                                  const Icon(
+                                                    Icons.person,
+                                                    size: 40,
+                                                    color: Colors.white,
+                                                  ),
+                                        )
+                                      : const Icon(
+                                          Icons.person,
+                                          size: 40,
+                                          color: Colors.white,
+                                        ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          // Name
+                          GestureDetector(
+                            onTap: _navigateToProfile,
+                            child: Text(
+                              _getFullName(),
+                              style: const TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          // Role & Org Switcher
+                          Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: _showOrganizationSwitcher,
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: Colors.white.withOpacity(0.2),
+                                    width: 1,
                                   ),
                                 ),
-                                const SizedBox(width: 16),
-                                // Profile Info
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        _getFullName(),
-                                        style: const TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.black87,
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        '${_roleService.getRoleName(widget.memberData)}${_organization != null ? ' - ${_organization!['name']}' : ''}',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                          color: Colors.white.withOpacity(0.95),
                                         ),
+                                        textAlign: TextAlign.center,
+                                        overflow: TextOverflow.ellipsis,
                                       ),
-                                      const SizedBox(height: 4),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 4,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFFD6EAFF),
-                                          borderRadius: BorderRadius.circular(12),
-                                        ),
-                                        child: Text(
-                                          _roleService.getRoleName(widget.memberData),
-                                          style: const TextStyle(
-                                            fontSize: 12,
-                                            color: Color(0xFF4A90E2),
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Icon(
+                                      Icons.keyboard_arrow_down_rounded,
+                                      color: Colors.white.withOpacity(0.8),
+                                      size: 18,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          // Date Card
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.calendar_today,
+                                  color: Colors.white,
+                                  size: 14,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  _getCurrentDate(),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
                                   ),
                                 ),
                               ],
                             ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
               ),
 
-              const SizedBox(height: 24),
-
-              // ---------- MAIN CONTENT ----------
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
+              // ---------- CONTENT AREA ----------
+              Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: _isDarkMode
+                      ? const Color(0xFF1F0B38)
+                      : const Color(0xFFF5F5F5),
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(32),
+                    topRight: Radius.circular(32),
+                  ),
+                ),
                 child: Column(
                   children: [
-                    // Conditional: Show Register Face OR Tab View
-                    if (_isCheckingFace)
-                      Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
-                              blurRadius: 10,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: const Center(
-                          child: Padding(
-                            padding: EdgeInsets.all(20.0),
-                            child: CircularProgressIndicator(),
-                          ),
-                        ),
-                      )
-                    else if (!_hasRegisteredFace)
-                      // Face Registration Card
-                      Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
-                              blurRadius: 10,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                const Icon(
-                                  Icons.face,
-                                  color: Color(0xFF4A90E2),
-                                ),
-                                const SizedBox(width: 12),
-                                const Text(
-                                  'Face Recognition',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 20),
-                            Container(
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: Colors.orange.shade50,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: Colors.orange.shade200,
-                                ),
+                    // COMBINED TIME & STATS CARD (OVERLAPPING)
+                    Transform.translate(
+                      offset: const Offset(0, -80),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: _isDarkMode
+                                ? const Color(0xFF2D1B4E)
+                                : Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.1),
+                                blurRadius: 20,
+                                offset: const Offset(0, 10),
                               ),
-                              child: Row(
+                            ],
+                          ),
+                          child: Column(
+                            children: [
+                              // Time and Location Row
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Icon(
-                                    Icons.warning_amber_rounded,
-                                    color: Colors.orange.shade700,
-                                    size: 32,
-                                  ),
-                                  const SizedBox(width: 12),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
-                                          'Face Not Registered',
+                                          AppLanguage.tr(
+                                            'User.dashboard.current_time',
+                                          ),
                                           style: TextStyle(
-                                            color: Colors.orange.shade900,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 15,
+                                            fontSize: 12,
+                                            color: _isDarkMode
+                                                ? Colors.white70
+                                                : Colors.grey.shade600,
                                           ),
                                         ),
                                         const SizedBox(height: 4),
                                         Text(
-                                          'Register your face to use attendance features',
+                                          '$currentTime ${nowOrg.hour < 12 ? 'AM' : 'PM'}',
                                           style: TextStyle(
-                                            color: Colors.orange.shade800,
-                                            fontSize: 13,
+                                            fontSize: 28,
+                                            fontWeight: FontWeight.bold,
+                                            color: _isDarkMode
+                                                ? Colors.white
+                                                : const Color(0xFF4A1E79),
                                           ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Container(
+                                    width: 1,
+                                    height: 45,
+                                    margin: const EdgeInsets.only(top: 10),
+                                    color: _isDarkMode
+                                        ? Colors.white24
+                                        : Colors.grey.shade200,
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          AppLanguage.tr(
+                                            'User.dashboard.office_location',
+                                          ),
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: _isDarkMode
+                                                ? Colors.white70
+                                                : Colors.grey.shade600,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Row(
+                                          children: [
+                                            Icon(
+                                              Icons.location_on,
+                                              color: _isDarkMode
+                                                  ? const Color(0xFFD0BCFF)
+                                                  : const Color(0xFF4A1E79),
+                                              size: 16,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Expanded(
+                                              child: Text(
+                                                _organization?['name'] ??
+                                                    'Office',
+                                                style: TextStyle(
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: _isDarkMode
+                                                      ? Colors.white
+                                                      : Colors.black87,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ],
                                     ),
                                   ),
                                 ],
                               ),
-                            ),
-                            const SizedBox(height: 20),
-                            SizedBox(
-                              width: double.infinity,
-                              height: 50,
-                              child: ElevatedButton.icon(
-                                onPressed: _navigateToFaceRegistration,
-                                icon: const Icon(Icons.face),
-                                label: const Text(
-                                  'Register Face',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF6C63FF),
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                ),
-                              ),
-                            ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Main Content
+                    Transform.translate(
+                      offset: const Offset(0, -70),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Column(
+                          children: [
+                            if (_isCheckingFace)
+                              const Center(child: CircularProgressIndicator())
+                            else if (!_hasRegisteredFace)
+                              _buildFaceRegistrationCard()
+                            else ...[
+                              _buildMainContent(),
+                            ],
                           ],
                         ),
-                      )
-                    else
-                      // Tab View: Statistics & Calendar + Daily Events
-                      Column(
-                        children: [
-                          // Tab Bar
-                          Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.04),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: TabBar(
-                              controller: _tabController,
-                              labelColor: const Color(0xFF4A90E2),
-                              unselectedLabelColor: Colors.grey,
-                              indicatorColor: const Color(0xFF4A90E2),
-                              indicatorWeight: 3,
-                              labelStyle: const TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
-                              ),
-                              tabs: const [
-                                Tab(text: 'Statistics'),
-                                Tab(text: 'Calendar'),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          
-                          // Tab Content
-                          SizedBox(
-                            height: 600,
-                            child: TabBarView(
-                              controller: _tabController,
-                              children: [
-                                _buildStatisticsTab(),
-                                _buildCalendarTab(),
-                              ],
-                            ),
-                          ),
-                        ],
                       ),
+                    ),
+                    const SizedBox(height: 80),
                   ],
                 ),
               ),
-
-              const SizedBox(height: 80),
             ],
           ),
         ),
       ),
-      // ---------- BOTTOM NAVIGATION ----------
       bottomNavigationBar: CustomBottomNav(
         currentIndex: 0,
+        isDarkMode: _isDarkMode,
+        attendanceMode: 'selfie',
+        onAttendanceTap: _handleSelfieAttendance,
         onTap: (index) {
-          switch (index) {
-            case 0:
-              // Already on Home
-              break;
-            case 1:
-              // Navigate to Profile
-              _navigateToProfile();
-              break;
+          if (index == 1) {
+            _navigateToProfile();
           }
         },
       ),
     );
   }
 
-  Widget _buildStatisticsTab() {
-    return SingleChildScrollView(
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 2),
+  Widget _buildFaceRegistrationCard() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: _isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: _isDarkMode ? 0.2 : 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.face,
+                color: _isDarkMode
+                    ? const Color(0xFFD0BCFF)
+                    : const Color(0xFF4A1E79),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                AppLanguage.tr('User.dashboard.face_recognition'),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: _isDarkMode ? Colors.white : Colors.black87,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.orange.shade200),
             ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+            child: Row(
               children: [
-                const Icon(
-                  Icons.bar_chart_rounded,
-                  color: Color(0xFF4A90E2),
+                Icon(
+                  Icons.warning_amber_rounded,
+                  color: Colors.orange.shade700,
+                  size: 32,
                 ),
                 const SizedBox(width: 12),
-                const Text(
-                  'This Month Statistics',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        AppLanguage.tr('User.dashboard.face_not_registered'),
+                        style: TextStyle(
+                          color: Colors.orange.shade900,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        AppLanguage.tr('User.dashboard.face_register_prompt'),
+                        style: TextStyle(
+                          color: Colors.orange.shade800,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 20),
-            
-            if (_isLoadingStats)
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(20.0),
-                  child: CircularProgressIndicator(),
-                ),
-              )
-            else
-              Row(
-                children: [
-                  Expanded(
-                    child: _buildStatCard(
-                      icon: Icons.event_available,
-                      label: 'Present',
-                      value: _attendanceStats?['present_days']?.toString() ?? '0',
-                      color: Colors.green,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _buildStatCard(
-                      icon: Icons.access_time,
-                      label: 'Late',
-                      value: _attendanceStats?['late_days']?.toString() ?? '0',
-                      color: Colors.orange,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _buildStatCard(
-                      icon: Icons.schedule,
-                      label: 'Hours',
-                      value: _attendanceStats?['work_hours'] ?? '0.0',
-                      color: Colors.blue,
-                    ),
-                  ),
-                ],
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton.icon(
+              onPressed: _navigateToFaceRegistration,
+              icon: const Icon(Icons.face),
+              label: Text(
+                AppLanguage.tr('User.dashboard.register_face'),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
-          ],
-        ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF4A1E79),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildCalendarTab() {
-    return SingleChildScrollView(
-      child: Column(
-        children: [
-          _buildCalendarSection(),
-          const SizedBox(height: 16),
-          _buildDailyEvents(),
+  Widget _buildMainContent() {
+    return Column(
+      children: [
+        // Tab Bar
+        Container(
+          decoration: BoxDecoration(
+            color: _isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: _isDarkMode ? 0.2 : 0.04),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: TabBar(
+            controller: _tabController,
+            labelColor: _isDarkMode
+                ? const Color(0xFFD0BCFF)
+                : const Color(0xFF4A1E79),
+            unselectedLabelColor: _isDarkMode ? Colors.white38 : Colors.grey,
+            indicatorColor: _isDarkMode
+                ? const Color(0xFFD0BCFF)
+                : const Color(0xFF4A1E79),
+            indicatorWeight: 3,
+            labelStyle: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+            tabs: [
+              Tab(text: AppLanguage.tr('User.dashboard.statistics')),
+              Tab(text: AppLanguage.tr('User.dashboard.calendar')),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Tab Content (Replaced TabBarView with conditional rendering for seamless scrolling)
+        _tabController.index == 0 ? _buildStatisticsTab() : _buildCalendarTab(),
+      ],
+    );
+  }
+
+  Widget _buildStatisticsTab() {
+    return Column(
+      children: [
+        // Weekly Overview Card (Matches Petugas Dashboard)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    AppLanguage.tr('User.dashboard.weekly_overview'),
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: _isDarkMode ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color:
+                          (_isDarkMode
+                                  ? const Color(0xFFD0BCFF)
+                                  : const Color(0xFF4A1E79))
+                              .withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      AppLanguage.tr('User.dashboard.this_week'),
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: _isDarkMode
+                            ? const Color(0xFFD0BCFF)
+                            : const Color(0xFF4A1E79),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: _isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          _isLoadingWeeklyData
+                              ? '--'
+                              : _totalWeeklyHours.toStringAsFixed(1),
+                          style: TextStyle(
+                            fontSize: 36,
+                            fontWeight: FontWeight.bold,
+                            color: _isDarkMode ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Text(
+                            AppLanguage.tr('User.dashboard.hrs'),
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: _isDarkMode
+                                  ? Colors.white54
+                                  : Colors.grey.shade600,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const Spacer(),
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 12,
+                                height: 12,
+                                decoration: BoxDecoration(
+                                  color: _isDarkMode
+                                      ? const Color(0xFFD0BCFF)
+                                      : const Color(0xFF4A1E79),
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                AppLanguage.tr('User.dashboard.hours'),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: _isDarkMode
+                                      ? Colors.white54
+                                      : Colors.grey.shade600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    if (!_isLoadingWeeklyData)
+                      Row(
+                        children: [
+                          Icon(
+                            _weeklyPercentageChange >= 0
+                                ? Icons.trending_up
+                                : Icons.trending_down,
+                            color: _weeklyPercentageChange >= 0
+                                ? (_isDarkMode
+                                      ? Colors.greenAccent
+                                      : Colors.green.shade600)
+                                : (_isDarkMode
+                                      ? Colors.redAccent
+                                      : Colors.red.shade600),
+                            size: 16,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${_weeklyPercentageChange >= 0 ? '+' : ''}${_weeklyPercentageChange.toStringAsFixed(1)}% ${AppLanguage.tr('User.dashboard.from_last_week')}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _weeklyPercentageChange >= 0
+                                  ? (_isDarkMode
+                                        ? Colors.greenAccent
+                                        : Colors.green.shade600)
+                                  : (_isDarkMode
+                                        ? Colors.redAccent
+                                        : Colors.red.shade600),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    const SizedBox(height: 24),
+                    // Bar Chart
+                    if (!_isLoadingWeeklyData)
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          _buildBarChart(
+                            AppLanguage.currentLanguage == 'id' ? 'SEN' : 'MON',
+                            _dailyHours[0],
+                            0,
+                          ),
+                          _buildBarChart(
+                            AppLanguage.currentLanguage == 'id' ? 'SEL' : 'TUE',
+                            _dailyHours[1],
+                            1,
+                          ),
+                          _buildBarChart(
+                            AppLanguage.currentLanguage == 'id' ? 'RAB' : 'WED',
+                            _dailyHours[2],
+                            2,
+                          ),
+                          _buildBarChart(
+                            AppLanguage.currentLanguage == 'id' ? 'KAM' : 'THU',
+                            _dailyHours[3],
+                            3,
+                          ),
+                          _buildBarChart(
+                            AppLanguage.currentLanguage == 'id' ? 'JUM' : 'FRI',
+                            _dailyHours[4],
+                            4,
+                          ),
+                        ],
+                      )
+                    else
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(20),
+                          child: CircularProgressIndicator(),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 8),
+
+        // Recent Activity Section
+        _buildRecentActivitySection(),
+      ],
+    );
+  }
+
+  Widget _buildRecentActivitySection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                AppLanguage.tr('User.dashboard.recent_activity'),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: _isDarkMode ? Colors.white : Colors.black87,
+                ),
+              ),
+              if (_recentActivities.isNotEmpty)
+                TextButton(
+                  onPressed: () {
+                    _tabController.animateTo(1);
+                  },
+                  child: Text(
+                    AppLanguage.tr('User.dashboard.view_all'),
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: _isDarkMode
+                          ? const Color(0xFFD0BCFF)
+                          : const Color(0xFF4A1E79),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (_isLoadingActivities)
+          Container(
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: _isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Center(
+              child: SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    _isDarkMode
+                        ? const Color(0xFFD0BCFF)
+                        : const Color(0xFF4A1E79),
+                  ),
+                ),
+              ),
+            ),
+          )
+        else if (_recentActivities.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: _isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Center(
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.history,
+                    size: 48,
+                    color: _isDarkMode ? Colors.white24 : Colors.grey.shade300,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    AppLanguage.tr('User.dashboard.no_recent_activity'),
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: _isDarkMode
+                          ? Colors.white54
+                          : Colors.grey.shade600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else
+          Column(
+            children: _recentActivities
+                .take(3)
+                .map((activity) => _buildModernActivityItem(activity))
+                .toList(),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildModernActivityItem(Map<String, dynamic> activity) {
+    // Note: User dashboard structure is slightly different from Petugas
+    final checkInTime = activity['checkInTime'] as DateTime?;
+    final checkOutTime = activity['checkOutTime'] as DateTime?;
+    final lastUpdated = activity['lastUpdated'] as DateTime?;
+    final status = activity['status']?.toString().toUpperCase();
+    final shiftName = activity['shiftName']?.toString().toUpperCase();
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: _isDarkMode
+                ? Colors.black26
+                : Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
         ],
       ),
+      child: Column(
+        children: [
+          if (checkInTime != null)
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: _isDarkMode ? Colors.white10 : Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.login,
+                    color: _isDarkMode ? Colors.green : Colors.green.shade600,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        AppLanguage.tr('User.dashboard.check_in'),
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: _isDarkMode ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        lastUpdated != null
+                            ? _formatEventTime(lastUpdated)
+                            : AppLanguage.tr('User.dashboard.today'),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _isDarkMode
+                              ? Colors.white54
+                              : Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      _formatShortTime(checkInTime),
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: _isDarkMode ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (activity['checkInMethod'] != null)
+                          Container(
+                            margin: const EdgeInsets.only(top: 4, right: 4),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _isDarkMode
+                                  ? Colors.white10
+                                  : Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(
+                                color: _isDarkMode
+                                    ? Colors.white12
+                                    : Colors.grey.shade300,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  _getMethodIcon(activity['checkInMethod']),
+                                  size: 10,
+                                  color: _isDarkMode
+                                      ? Colors.white70
+                                      : Colors.grey.shade700,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  _formatMethodName(activity['checkInMethod']),
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                    color: _isDarkMode
+                                        ? Colors.white70
+                                        : Colors.grey.shade700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        if (status != null)
+                          Container(
+                            margin: const EdgeInsets.only(top: 4),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color:
+                                  (status.contains('LATE')
+                                          ? Colors.orange
+                                          : Colors.green)
+                                      .withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              status,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: status.contains('LATE')
+                                    ? Colors.orange.shade700
+                                    : Colors.green.shade700,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          if (checkInTime != null && checkOutTime != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Divider(
+                height: 1,
+                color: _isDarkMode ? Colors.white24 : Colors.grey.shade200,
+              ),
+            ),
+          if (checkOutTime != null)
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: _isDarkMode ? Colors.white10 : Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.logout,
+                    color: _isDarkMode ? Colors.red : Colors.red.shade600,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        AppLanguage.tr('User.dashboard.check_out'),
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: _isDarkMode ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        lastUpdated != null
+                            ? _formatEventTime(lastUpdated)
+                            : AppLanguage.tr('User.dashboard.today'),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _isDarkMode
+                              ? Colors.white54
+                              : Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      _formatShortTime(checkOutTime),
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: _isDarkMode ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (activity['checkOutMethod'] != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            margin: const EdgeInsets.only(right: 4),
+                            decoration: BoxDecoration(
+                              color: _isDarkMode
+                                  ? Colors.white10
+                                  : Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(
+                                color: _isDarkMode
+                                    ? Colors.white12
+                                    : Colors.grey.shade300,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  _getMethodIcon(activity['checkOutMethod']),
+                                  size: 10,
+                                  color: _isDarkMode
+                                      ? Colors.white70
+                                      : Colors.grey.shade700,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  _formatMethodName(activity['checkOutMethod']),
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                    color: _isDarkMode
+                                        ? Colors.white70
+                                        : Colors.grey.shade700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        if (shiftName != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _isDarkMode
+                                  ? Colors.white10
+                                  : const Color(0xFF4A1E79).withOpacity(0.08),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: const Color(0xFF4A1E79).withOpacity(0.1),
+                              ),
+                            ),
+                            child: Text(
+                              shiftName,
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w600,
+                                color: _isDarkMode
+                                    ? Colors.white70
+                                    : const Color(0xFF4A1E79),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBarChart(String day, double hours, int dayIndex) {
+    // Find max hours for normalization
+    final maxHours = _dailyHours.isEmpty
+        ? 0.0
+        : _dailyHours.reduce((a, b) => a > b ? a : b);
+
+    // Calculate height (normalize to 0-1 range, with minimum 20% for visibility)
+    double normalizedHeight = 0.2; // Minimum height for empty days
+    if (maxHours > 0 && hours > 0) {
+      normalizedHeight = (hours / maxHours).clamp(0.2, 1.0);
+    }
+
+    // Check if this is the current day
+    final now = DateTime.now();
+    final isCurrentDay = now.weekday == dayIndex + 1;
+
+    return Column(
+      children: [
+        Container(
+          width: 40,
+          height: 100 * normalizedHeight,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: isCurrentDay
+                  ? (_isDarkMode
+                        ? [const Color(0xFFD0BCFF), const Color(0xFF8938DF)]
+                        : [const Color(0xFF8938DF), const Color(0xFF4A1E79)])
+                  : [
+                      (_isDarkMode
+                              ? const Color(0xFFD0BCFF)
+                              : const Color(0xFF4A1E79))
+                          .withValues(alpha: _isDarkMode ? 0.25 : 0.15),
+                      (_isDarkMode
+                              ? const Color(0xFFD0BCFF)
+                              : const Color(0xFF4A1E79))
+                          .withValues(alpha: _isDarkMode ? 0.25 : 0.15),
+                    ],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          day,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: isCurrentDay ? FontWeight.bold : FontWeight.w500,
+            color: isCurrentDay
+                ? (_isDarkMode
+                      ? const Color(0xFFD0BCFF)
+                      : const Color(0xFF4A1E79))
+                : (_isDarkMode ? Colors.white54 : Colors.grey.shade600),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCalendarTab() {
+    return Column(
+      children: [
+        _buildCalendarSection(),
+        const SizedBox(height: 16),
+        _buildDailyEvents(),
+      ],
     );
   }
 
   Widget _buildCalendarSection() {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: _isDarkMode ? 0.2 : 0.06),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -1130,18 +2476,14 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
       child: Column(
         children: [
           TableCalendar<Map<String, dynamic>>(
-            firstDay: DateTime.utc(2020, 1, 1),
-            lastDay: DateTime.utc(2030, 12, 31),
+            locale: AppLanguage.currentLanguage == 'id' ? 'id_ID' : 'en_US',
+            firstDay: DateTime.utc(2023, 1, 1),
+            lastDay: DateTime.utc(2100, 12, 31),
             focusedDay: _focusedDay,
             calendarFormat: _calendarFormat,
-            eventLoader: _getEventsForDay,
-            startingDayOfWeek: StartingDayOfWeek.monday,
-            selectedDayPredicate: (day) {
-              return isSameDay(_selectedDay, day);
-            },
+            selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
             onDaySelected: _onDaySelected,
             onFormatChanged: (format) {
-              if (!mounted) return;
               if (_calendarFormat != format) {
                 setState(() {
                   _calendarFormat = format;
@@ -1149,42 +2491,78 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
               }
             },
             onPageChanged: (focusedDay) {
-              if (!mounted) return;
-              setState(() {
-                _focusedDay = focusedDay;
-              });
+              _focusedDay = focusedDay;
+              _loadAttendanceData(focusedDay);
             },
+            eventLoader: _getEventsForDay,
             calendarStyle: CalendarStyle(
               outsideDaysVisible: false,
-              selectedDecoration: const BoxDecoration(
-                color: Color(0xFF4A90E2),
+              cellMargin: const EdgeInsets.all(6),
+              defaultTextStyle: TextStyle(
+                fontSize: 14,
+                color: _isDarkMode ? Colors.white70 : Colors.black87,
+              ),
+              weekendTextStyle: const TextStyle(
+                fontSize: 14,
+                color: Colors.red,
+              ),
+              selectedDecoration: BoxDecoration(
+                color: const Color(0xFF4A1E79),
                 shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF4A1E79).withOpacity(0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              selectedTextStyle: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
               ),
               todayDecoration: BoxDecoration(
-                color: const Color(0xFF4A90E2).withOpacity(0.6),
+                color: const Color(0xFF4A1E79).withOpacity(0.2),
                 shape: BoxShape.circle,
               ),
-              markersMaxCount: 3,
+              todayTextStyle: const TextStyle(
+                color: Color(0xFF4A1E79),
+                fontWeight: FontWeight.bold,
+              ),
+              markersMaxCount: 1,
               markerDecoration: const BoxDecoration(
-                color: Colors.orange,
+                color: Color(0xFFF59E0B),
                 shape: BoxShape.circle,
               ),
               markerSize: 6,
             ),
             headerStyle: HeaderStyle(
-              formatButtonVisible: true,
+              formatButtonVisible: false,
               titleCentered: true,
-              formatButtonDecoration: BoxDecoration(
-                color: const Color(0xFF4A90E2),
-                borderRadius: BorderRadius.circular(8),
+              titleTextStyle: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: _isDarkMode ? Colors.white : Colors.black87,
               ),
-              formatButtonTextStyle: const TextStyle(
-                color: Colors.white,
+              leftChevronIcon: Icon(
+                Icons.chevron_left,
+                color: _isDarkMode ? Colors.white70 : Colors.grey,
+              ),
+              rightChevronIcon: Icon(
+                Icons.chevron_right,
+                color: _isDarkMode ? Colors.white70 : Colors.grey,
+              ),
+            ),
+            daysOfWeekStyle: DaysOfWeekStyle(
+              weekdayStyle: TextStyle(
+                color: _isDarkMode ? Colors.white54 : Colors.grey.shade600,
+                fontWeight: FontWeight.bold,
                 fontSize: 12,
               ),
-              titleTextStyle: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
+              weekendStyle: TextStyle(
+                color: _isDarkMode ? Colors.white54 : Colors.grey.shade600,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
               ),
             ),
           ),
@@ -1196,16 +2574,16 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
 
   Widget _buildDailyEvents() {
     final events = _getSelectedDayEvents();
-    
+
     if (events.isEmpty) {
       return Container(
-        padding: const EdgeInsets.all(40),
+        padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: _isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.04),
+              color: Colors.black.withValues(alpha: _isDarkMode ? 0.2 : 0.04),
               blurRadius: 10,
               offset: const Offset(0, 2),
             ),
@@ -1213,13 +2591,14 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
         ),
         child: Center(
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.event_busy, color: Colors.grey.shade300, size: 48),
               const SizedBox(height: 12),
               Text(
-                'No Attendance Data',
+                AppLanguage.tr('User.dashboard.no_attendance_data'),
                 style: TextStyle(
-                  color: Colors.grey.shade600,
+                  color: _isDarkMode ? Colors.white60 : Colors.grey.shade600,
                   fontSize: 15,
                   fontWeight: FontWeight.w500,
                 ),
@@ -1228,10 +2607,7 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
               const SizedBox(height: 4),
               Text(
                 DateFormat('dd MMM yyyy').format(_selectedDay),
-                style: TextStyle(
-                  color: Colors.grey.shade400,
-                  fontSize: 13,
-                ),
+                style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
               ),
             ],
           ),
@@ -1241,11 +2617,13 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF6C63FF).withOpacity(0.08),
+            color: const Color(
+              0xFF6C63FF,
+            ).withValues(alpha: _isDarkMode ? 0.2 : 0.08),
             blurRadius: 15,
             offset: const Offset(0, 4),
           ),
@@ -1257,7 +2635,9 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFF6C63FF).withOpacity(0.05),
+              color: const Color(
+                0xFF6C63FF,
+              ).withValues(alpha: _isDarkMode ? 0.15 : 0.05),
               borderRadius: const BorderRadius.only(
                 topLeft: Radius.circular(16),
                 topRight: Radius.circular(16),
@@ -1282,26 +2662,31 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Daily Events',
+                      Text(
+                        AppLanguage.tr('User.dashboard.daily_events'),
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.bold,
-                          color: Colors.black87,
+                          color: _isDarkMode ? Colors.white : Colors.black87,
                         ),
                       ),
                       Text(
                         DateFormat('EEE, dd MMM yyyy').format(_selectedDay),
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors.grey.shade600,
+                          color: _isDarkMode
+                              ? Colors.white38
+                              : Colors.grey.shade600,
                         ),
                       ),
                     ],
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF6C63FF),
                     borderRadius: BorderRadius.circular(12),
@@ -1336,15 +2721,16 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
   }
 
   Widget _buildEventListItem(Map<String, dynamic> event) {
-    final eventTime = DateTime.parse(event['event_time']);
     final eventColor = _getEventColor(event['type']);
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isDarkMode
+            ? const Color(0xFF1F0B38).withValues(alpha: 0.3)
+            : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: eventColor.withOpacity(0.2),
+          color: eventColor.withValues(alpha: _isDarkMode ? 0.4 : 0.2),
           width: 1,
         ),
       ),
@@ -1364,10 +2750,7 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
-                      colors: [
-                        eventColor.withOpacity(0.8),
-                        eventColor,
-                      ],
+                      colors: [eventColor.withOpacity(0.8), eventColor],
                     ),
                     borderRadius: BorderRadius.circular(10),
                     boxShadow: [
@@ -1387,22 +2770,28 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
                     children: [
                       Text(
                         _getEventLabel(event['type']),
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 14,
-                          color: Colors.black87,
+                          color: _isDarkMode ? Colors.white : Colors.black87,
                         ),
                       ),
                       const SizedBox(height: 4),
                       Row(
                         children: [
-                          Icon(Icons.access_time, size: 12, color: Colors.grey.shade600),
+                          Icon(
+                            Icons.access_time,
+                            size: 12,
+                            color: Colors.grey.shade600,
+                          ),
                           const SizedBox(width: 4),
                           Text(
                             _formatTime(event['event_time']),
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.grey.shade700,
+                              color: _isDarkMode
+                                  ? Colors.white70
+                                  : Colors.grey.shade700,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -1435,25 +2824,15 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
           width: 48,
           height: 48,
           fit: BoxFit.cover,
-          placeholder: (context, url) => Icon(
-            _getEventIcon(event['type']),
-            color: iconColor,
-            size: 22,
-          ),
-          errorWidget: (context, url, error) => Icon(
-            _getEventIcon(event['type']),
-            color: iconColor,
-            size: 22,
-          ),
+          placeholder: (context, url) =>
+              Icon(_getEventIcon(event['type']), color: iconColor, size: 22),
+          errorWidget: (context, url, error) =>
+              Icon(_getEventIcon(event['type']), color: iconColor, size: 22),
         ),
       );
     }
 
-    return Icon(
-      _getEventIcon(event['type']),
-      color: iconColor,
-      size: 22,
-    );
+    return Icon(_getEventIcon(event['type']), color: iconColor, size: 22);
   }
 
   Widget _buildEventStatusRow(Map<String, dynamic> event) {
@@ -1487,7 +2866,10 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
             decoration: BoxDecoration(
               color: Colors.orange.withOpacity(0.15),
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: Colors.orange.withOpacity(0.5), width: 1),
+              border: Border.all(
+                color: Colors.orange.withOpacity(0.5),
+                width: 1,
+              ),
             ),
             child: Text(
               '+${event['late_minutes']}m',
@@ -1514,44 +2896,5 @@ class _UserDashboardPageState extends State<UserDashboardPage> with SingleTicker
       default:
         return Colors.grey;
     }
-  }
-
-  Widget _buildStatCard({
-    required IconData icon,
-    required String label,
-    required String value,
-    required Color color,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 28),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 11,
-              color: color.withOpacity(0.8),
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }

@@ -3,12 +3,17 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import '../../helpers/language_helper.dart';
 
 import '../../models/offline_attendance.dart';
 import '../../services/offline_database_service.dart';
 import '../services/attendance_sync_service.dart';
 import '../../helpers/timezone_helper.dart';
 import '../../helpers/sound_helper.dart';
+import 'package:app_settings/app_settings.dart';
+import 'package:android_intent_plus/android_intent.dart';
+import 'package:android_intent_plus/flag.dart';
+import 'dart:io';
 import 'manual_check_page.dart';
 
 class RfidAttendancePage extends StatefulWidget {
@@ -44,11 +49,11 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
   List<Map<String, dynamic>> _availableModes = [];
   bool _isLoadingModes = false;
   DateTime _currentTime = DateTime.now();
-  
+
   // Animation Controller for pulsing effect
   double _pulseRadius = 0.0;
   Timer? _pulseTimer;
-  
+
   String? _workTimeMode;
   Map<String, dynamic>? _memberSchedule;
   Timer? _scheduleCheckTimer;
@@ -77,12 +82,12 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
     _syncStatusSub = _syncService.syncStatusStream.listen((status) {
       if (mounted) _loadPendingSyncCount();
     });
-    
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Future.delayed(const Duration(milliseconds: 100), () {
         if (mounted) _cardFocusNode.requestFocus();
       });
-      
+
       // Cache member data after a short delay to ensure connectivity is checked
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted && _isOnline) {
@@ -92,9 +97,12 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
           _loadOfflineAttendanceData();
         }
       });
-      
+
       // Trigger initial mode selection after page loads
       _loadAvailableModes();
+
+      // Show OTG setup prompt automatically on entry
+      _showOTGSetupPrompt();
     });
   }
 
@@ -135,56 +143,60 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
     }
   }
 
-
   Future<void> _loadOfflineAttendanceData() async {
     try {
       final offlineAttendances = await _offlineDb.getAllAttendances(limit: 100);
-      
+
       if (mounted && offlineAttendances.isNotEmpty) {
         final List<_AttendanceEntry> loadedEntries = [];
-        
+
         for (final attendance in offlineAttendances) {
           // Find member data from cache
           final orgId = _organizationId;
           if (orgId == null) continue;
-          
+
           final cardData = await _offlineDb.findMemberByCardInCache(
             attendance.cardNumber,
             orgId,
           );
-          
+
           Map<String, dynamic> memberInfo = {};
           int? memberId;
-          
+
           if (cardData != null) {
-            memberInfo = cardData['organization_members'] as Map<String, dynamic>? ?? {};
-            memberId = cardData['organization_member_id'] as int? ?? memberInfo['id'] as int?;
-            
+            memberInfo =
+                cardData['organization_members'] as Map<String, dynamic>? ?? {};
+            memberId =
+                cardData['organization_member_id'] as int? ??
+                memberInfo['id'] as int?;
+
             // If user_profiles is missing or empty, but we have userName from attendance, use it
-            final profile = memberInfo['user_profiles'] as Map<String, dynamic>?;
-            if ((profile == null || profile.isEmpty) && 
-                attendance.userName != null && 
+            final profile =
+                memberInfo['user_profiles'] as Map<String, dynamic>?;
+            if ((profile == null || profile.isEmpty) &&
+                attendance.userName != null &&
                 attendance.userName!.isNotEmpty) {
               final userName = attendance.userName!;
               final nameParts = userName.split(' ');
               memberInfo['user_profiles'] = {
                 'display_name': userName,
                 'first_name': nameParts.isNotEmpty ? nameParts.first : '',
-                'last_name': nameParts.length > 1 
+                'last_name': nameParts.length > 1
                     ? nameParts.sublist(1).join(' ')
                     : '',
               };
             }
           } else {
             // If cardData not found but we have userName from attendance, create minimal memberInfo
-            if (attendance.userName != null && attendance.userName!.isNotEmpty) {
+            if (attendance.userName != null &&
+                attendance.userName!.isNotEmpty) {
               final userName = attendance.userName!;
               final nameParts = userName.split(' ');
               memberInfo = {
                 'user_profiles': {
                   'display_name': userName,
                   'first_name': nameParts.isNotEmpty ? nameParts.first : '',
-                  'last_name': nameParts.length > 1 
+                  'last_name': nameParts.length > 1
                       ? nameParts.sublist(1).join(' ')
                       : '',
                 },
@@ -192,25 +204,27 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
               memberId = attendance.organizationMemberId;
             }
           }
-          
+
           // Use organizationMemberId from attendance if available
           if (memberId == null && attendance.organizationMemberId != null) {
             memberId = attendance.organizationMemberId;
           }
-          
+
           if (memberId != null) {
             final timestamp = DateTime.parse(attendance.timestamp);
-            loadedEntries.add(_AttendanceEntry(
-              memberId: memberId,
-              memberInfo: memberInfo,
-              cardNumber: attendance.cardNumber,
-              action: attendance.eventType,
-              timestamp: timestamp,
-              workTimeMode: attendance.workTimeMode,
-            ));
+            loadedEntries.add(
+              _AttendanceEntry(
+                memberId: memberId,
+                memberInfo: memberInfo,
+                cardNumber: attendance.cardNumber,
+                action: attendance.eventType,
+                timestamp: timestamp,
+                workTimeMode: attendance.workTimeMode,
+              ),
+            );
           }
         }
-        
+
         setState(() {
           _entries.clear();
           _entries.addAll(loadedEntries);
@@ -242,7 +256,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
 
   void _updateModeBasedOnSchedule() {
     if (_availableModes.isEmpty) return;
-    
+
     // 1. If we have a personal schedule, try to determine work/break time mode
     if (_memberSchedule != null) {
       final newWorkTimeMode = _getWorkTimeMode();
@@ -254,7 +268,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         });
       }
     }
-    
+
     // 2. If no shift is selected yet, or if we want to ensure time-based selection,
     // call _autoSelectModeFromWorkTimeMode regardless of schedule existence.
     if (_selectedMode == null && _availableModes.isNotEmpty) {
@@ -264,25 +278,25 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
 
   void _autoSelectModeFromWorkTimeMode() {
     if (_availableModes.isEmpty) return;
-    
+
     final now = DateTime.now();
     final currentMinutes = now.hour * 60 + now.minute;
-    
+
     Map<String, dynamic>? matchingMode;
-    
+
     // 1. Try to find a shift that matches the current time range
     for (var mode in _availableModes) {
       final startTimeStr = mode['start_time'] as String?;
       final endTimeStr = mode['end_time'] as String?;
-      
+
       if (startTimeStr != null && endTimeStr != null) {
         final start = _parseTimeString(startTimeStr);
         final end = _parseTimeString(endTimeStr);
-        
+
         if (start != null && end != null) {
           int startMin = start.hour * 60 + start.minute;
           int endMin = end.hour * 60 + end.minute;
-          
+
           // Handle shifts crossing midnight
           if (endMin < startMin) {
             if (currentMinutes >= startMin || currentMinutes < endMin) {
@@ -298,38 +312,45 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         }
       }
     }
-    
+
     // 2. Fallback to existing schedule-based workTimeMode logic if no time-range match found
     if (matchingMode == null && _workTimeMode != null) {
       for (var mode in _availableModes) {
-        final modeCode = mode['code'] as String? ?? mode['name'] as String? ?? '';
+        final modeCode =
+            mode['code'] as String? ?? mode['name'] as String? ?? '';
         final modeName = mode['name'] as String? ?? '';
-        
-        if (_workTimeMode == 'break_time' && 
-            (modeCode.toLowerCase().contains('break') || modeName.toLowerCase().contains('break'))) {
+
+        if (_workTimeMode == 'break_time' &&
+            (modeCode.toLowerCase().contains('break') ||
+                modeName.toLowerCase().contains('break'))) {
           matchingMode = mode;
           break;
-        } else if (_workTimeMode == 'work_time' && 
-            (modeCode.toLowerCase().contains('work') || modeName.toLowerCase().contains('kerja'))) {
+        } else if (_workTimeMode == 'work_time' &&
+            (modeCode.toLowerCase().contains('work') ||
+                modeName.toLowerCase().contains('kerja'))) {
           matchingMode = mode;
           break;
-        } else if (_workTimeMode == 'overtime' && 
-            (modeCode.toLowerCase().contains('overtime') || modeName.toLowerCase().contains('lembur'))) {
+        } else if (_workTimeMode == 'overtime' &&
+            (modeCode.toLowerCase().contains('overtime') ||
+                modeName.toLowerCase().contains('lembur'))) {
           matchingMode = mode;
           break;
         }
       }
     }
-    
+
     // 3. Absolute fallback to first mode
     if (matchingMode == null && _availableModes.isNotEmpty) {
       matchingMode = _availableModes.first;
     }
-    
+
     if (matchingMode != null && _selectedMode?['id'] != matchingMode['id']) {
       setState(() {
         _selectedMode = matchingMode;
-        _workTimeMode = matchingMode?['code'] as String? ?? matchingMode?['name'] as String? ?? _workTimeMode;
+        _workTimeMode =
+            matchingMode?['code'] as String? ??
+            matchingMode?['name'] as String? ??
+            _workTimeMode;
       });
     }
   }
@@ -338,7 +359,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
     try {
       final today = DateTime.now();
       final todayStr = today.toIso8601String().split('T')[0];
-      
+
       final schedule = await _supabase
           .from('member_schedules')
           .select('id, work_schedule_id, shift_id, effective_date, end_date')
@@ -354,38 +375,41 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         final scheduleMap = schedule;
         final shiftId = scheduleMap['shift_id'] as int?;
         final workScheduleId = scheduleMap['work_schedule_id'] as int?;
-        
+
         Map<String, dynamic>? scheduleData;
-        
+
         if (shiftId != null) {
           final shift = await _supabase
               .from('shifts')
               .select('id, start_time, end_time')
               .eq('id', shiftId)
               .maybeSingle();
-          
+
           if (shift != null) {
             scheduleData = {'type': 'shift', 'shift': shift};
           }
         } else if (workScheduleId != null) {
           final dayOfWeek = today.weekday % 7;
-          
+
           final detail = await _supabase
               .from('work_schedule_details')
-              .select('day_of_week, start_time, end_time, break_start, break_end')
+              .select(
+                'day_of_week, start_time, end_time, break_start, break_end',
+              )
               .eq('work_schedule_id', workScheduleId)
               .eq('day_of_week', dayOfWeek)
               .maybeSingle();
-          
+
           if (detail != null) {
             scheduleData = {'type': 'work_schedule', 'detail': detail};
           }
         }
-        
+
         if (scheduleData != null) {
           final scheduleDataMap = scheduleData;
           setState(() {
-            _memberSchedule = Map<String, dynamic>.from(scheduleMap)..addAll(scheduleDataMap);
+            _memberSchedule = Map<String, dynamic>.from(scheduleMap)
+              ..addAll(scheduleDataMap);
           });
         }
       }
@@ -416,7 +440,9 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Gagal memuat mode: $e'),
+            content: Text(
+              '${AppLanguage.tr('attendance.rfid.gagal_memuat_mode')}: $e',
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -460,11 +486,11 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 24),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
                     child: Text(
-                      'Pilih Mode Shift',
-                      style: TextStyle(
+                      AppLanguage.tr('attendance.rfid.pilih_mode_shift'),
+                      style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
@@ -472,13 +498,15 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                   ),
                   const SizedBox(height: 16),
                   if (_isLoadingModes)
-                    const Expanded(child: Center(child: CircularProgressIndicator()))
-                  else if (_availableModes.isEmpty)
                     const Expanded(
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  else if (_availableModes.isEmpty)
+                    Expanded(
                       child: Center(
                         child: Text(
-                          'Belum ada mode shift tersedia',
-                          style: TextStyle(
+                          AppLanguage.tr('attendance.rfid.belum_ada_mode'),
+                          style: const TextStyle(
                             fontSize: 16,
                             color: Colors.grey,
                           ),
@@ -497,17 +525,22 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                           final start = mode['start_time'] as String?;
                           final end = mode['end_time'] as String?;
                           final isSelected = _selectedMode?['id'] == mode['id'];
-                          
+
                           return ListTile(
                             title: Text(
                               mode['name'] ?? '-',
-                              style: const TextStyle(fontWeight: FontWeight.w600),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                             subtitle: start != null && end != null
                                 ? Text('$start - $end')
                                 : null,
                             trailing: isSelected
-                                ? const Icon(Icons.check_circle, color: Colors.green)
+                                ? const Icon(
+                                    Icons.check_circle,
+                                    color: Colors.green,
+                                  )
                                 : null,
                             onTap: () => Navigator.of(context).pop(mode),
                           );
@@ -526,7 +559,8 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
     if (selected != null && mounted) {
       setState(() {
         _selectedMode = selected;
-        _workTimeMode = selected['code'] as String? ?? selected['name'] as String?;
+        _workTimeMode =
+            selected['code'] as String? ?? selected['name'] as String?;
       });
       await _showInOutSelector();
     }
@@ -565,7 +599,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                           padding: const EdgeInsets.symmetric(vertical: 12),
                         ),
                         onPressed: () => Navigator.pop(context, 'check_in'),
-                        child: const Text('IN'),
+                        child: Text(AppLanguage.tr('attendance.rfid.in')),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -577,7 +611,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                           padding: const EdgeInsets.symmetric(vertical: 12),
                         ),
                         onPressed: () => Navigator.pop(context, 'check_out'),
-                        child: const Text('OUT'),
+                        child: Text(AppLanguage.tr('attendance.rfid.out')),
                       ),
                     ),
                   ],
@@ -604,7 +638,6 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
     }
   }
 
-
   String _getWorkTimeMode() {
     if (_workTimeMode != null) return _workTimeMode!;
     if (_memberSchedule == null) return 'work_time';
@@ -613,20 +646,20 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
       _currentTime.toUtc(),
       _organizationTimezone,
     );
-    
+
     final currentMinutes = orgTime.hour * 60 + orgTime.minute;
     final scheduleType = _memberSchedule!['type'] as String?;
-    
+
     if (scheduleType == 'shift') {
       final shift = _memberSchedule!['shift'] as Map<String, dynamic>?;
       if (shift != null) {
         final startTime = _parseTimeString(shift['start_time'] as String?);
         final endTime = _parseTimeString(shift['end_time'] as String?);
-        
+
         if (startTime != null && endTime != null) {
           final startMin = startTime.hour * 60 + startTime.minute;
           final endMin = endTime.hour * 60 + endTime.minute;
-          
+
           if (currentMinutes >= startMin && currentMinutes < endMin) {
             return 'work_time';
           }
@@ -638,15 +671,16 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         final startTime = _parseTimeString(detail['start_time'] as String?);
         final breakStart = _parseTimeString(detail['break_start'] as String?);
         final breakEnd = _parseTimeString(detail['break_end'] as String?);
-        
+
         if (startTime != null && breakStart != null && breakEnd != null) {
           final startMin = startTime.hour * 60 + startTime.minute;
           final breakStartMin = breakStart.hour * 60 + breakStart.minute;
           final breakEndMin = breakEnd.hour * 60 + breakEnd.minute;
-          
+
           if (currentMinutes >= startMin && currentMinutes < breakStartMin) {
             return 'work_time';
-          } else if (currentMinutes >= breakStartMin && currentMinutes < breakEndMin) {
+          } else if (currentMinutes >= breakStartMin &&
+              currentMinutes < breakEndMin) {
             return 'break_time';
           } else if (currentMinutes >= breakEndMin) {
             return 'work_time';
@@ -663,7 +697,10 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
     try {
       final parts = timeStr.split(':');
       if (parts.length >= 2) {
-        return TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+        return TimeOfDay(
+          hour: int.parse(parts[0]),
+          minute: int.parse(parts[1]),
+        );
       }
     } catch (e) {
       debugPrint('Error parsing time: $timeStr');
@@ -673,7 +710,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
 
   Future<void> _cacheMemberData() async {
     if (!_isOnline) return;
-    
+
     try {
       final orgId = _organizationId;
       if (orgId == null) return;
@@ -703,7 +740,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
           debugPrint('❌ Failed to cache card ${card['card_number']}: $e');
         }
       }
-      
+
       // debugPrint('✅ Successfully cached $cachedCount/${cards.length} member cards for offline use');
     } catch (e) {
       debugPrint('❌ Error caching member data: $e');
@@ -726,7 +763,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
           _organizationTimezone = org['timezone'] as String? ?? 'Asia/Jakarta';
           _organizationName = org['name'] as String? ?? '';
         });
-        
+
         // Re-calculate auto-selection now that we have the correct timezone
         _autoSelectModeFromWorkTimeMode();
       }
@@ -757,24 +794,31 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
     try {
       // 1. ALWAYS TRY CACHE FIRST for maximum speed
       debugPrint('🔍 Searching in offline cache for $normalizedCardNumber...');
-      Map<String, dynamic>? cardData = await _offlineDb.findMemberByCardInCache(normalizedCardNumber, orgId);
-      
+      Map<String, dynamic>? cardData = await _offlineDb.findMemberByCardInCache(
+        normalizedCardNumber,
+        orgId,
+      );
+
       if (cardData != null) {
-        final memberInfo = cardData['organization_members'] as Map<String, dynamic>?;
+        final memberInfo =
+            cardData['organization_members'] as Map<String, dynamic>?;
         final userName = _composeMemberName(memberInfo);
         debugPrint('✅ Instant cache hit: $userName');
-        
+
         // In background, if online, verify if it still exists (silent cleanup)
         if (_isOnline) {
-          _supabase.from('rfid_cards')
+          _supabase
+              .from('rfid_cards')
               .select('id')
               .eq('card_number', normalizedCardNumber)
               .eq('is_active', true)
               .maybeSingle()
               .then((res) {
                 if (res == null) {
-                   debugPrint('🗑️ Card deleted from server, removing from cache');
-                   _offlineDb.deleteMemberFromCache(normalizedCardNumber);
+                  debugPrint(
+                    '🗑️ Card deleted from server, removing from cache',
+                  );
+                  _offlineDb.deleteMemberFromCache(normalizedCardNumber);
                 }
               });
         }
@@ -783,14 +827,16 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
 
       // 2. ONLY IF NOT IN CACHE, try online search
       if (_isOnline) {
-        debugPrint('🌐 Cache miss, searching online for $normalizedCardNumber...');
+        debugPrint(
+          '🌐 Cache miss, searching online for $normalizedCardNumber...',
+        );
         final cardResult = await _supabase
             .from('rfid_cards')
             .select('id, card_number, organization_member_id, is_active')
             .eq('card_number', normalizedCardNumber)
             .eq('is_active', true)
             .maybeSingle();
-        
+
         if (cardResult != null) {
           final memberId = cardResult['organization_member_id'] as int?;
           if (memberId != null) {
@@ -805,7 +851,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                 .eq('organization_id', orgId)
                 .eq('is_active', true)
                 .maybeSingle();
-            
+
             if (memberData != null) {
               cardData = {
                 'id': cardResult['id'],
@@ -813,7 +859,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                 'organization_member_id': memberId,
                 'organization_members': memberData,
               };
-              
+
               debugPrint('✅ Found card online, caching for next time');
               _offlineDb.cacheMemberData(cardData);
               return cardData;
@@ -824,17 +870,17 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
     } catch (e) {
       debugPrint('❌ Error finding card: $e');
     }
-    
+
     return null;
   }
 
   void _showDuplicateAlert(String name, String department, String mode) {
     // Show elegant overlay notification instead of snackbar
     if (!mounted) return;
-    
+
     final overlay = Overlay.of(context);
     late OverlayEntry overlayEntry;
-    
+
     overlayEntry = OverlayEntry(
       builder: (context) => Positioned(
         top: 100,
@@ -917,9 +963,9 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         ),
       ),
     );
-    
+
     overlay.insert(overlayEntry);
-    
+
     // Auto remove after 3 seconds
     Future.delayed(const Duration(seconds: 3), () {
       if (overlayEntry.mounted) {
@@ -927,7 +973,6 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
       }
     });
   }
-
 
   Future<void> _handleCardScan() async {
     final cardNumber = _cardController.text.trim();
@@ -952,8 +997,11 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         return;
       }
 
-      final memberInfo = cardData['organization_members'] as Map<String, dynamic>? ?? {};
-      final memberId = cardData['organization_member_id'] as int? ?? memberInfo['id'] as int?;
+      final memberInfo =
+          cardData['organization_members'] as Map<String, dynamic>? ?? {};
+      final memberId =
+          cardData['organization_member_id'] as int? ??
+          memberInfo['id'] as int?;
 
       if (memberId == null) {
         debugPrint('❌ Member ID not found');
@@ -964,8 +1012,10 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
       if (memberOrgId != _organizationId) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Kartu tidak terdaftar di organisasi ini'),
+          SnackBar(
+            content: Text(
+              AppLanguage.tr('attendance.rfid.card_not_registered'),
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -978,9 +1028,9 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
 
       // --- INSTANT FEEDBACK START ---
       // Provide success sound and UI update immediately
-       await SoundHelper.playSuccessSound();
-       
-       if (mounted) {
+      await SoundHelper.playSuccessSound();
+
+      if (mounted) {
         setState(() {
           final newEntry = _AttendanceEntry(
             memberId: memberId,
@@ -995,7 +1045,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         });
       }
       // --- INSTANT FEEDBACK END ---
-      
+
       // Perform duplicate checks and database saving in background
       _processAttendanceInBackground(
         memberId: memberId,
@@ -1004,15 +1054,11 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         action: action,
         workTimeMode: workTimeMode,
       );
-      
     } catch (e) {
       debugPrint('❌ Error card scan: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -1029,8 +1075,10 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
     required String? workTimeMode,
   }) async {
     try {
-      final todayStr = TimezoneHelper.getCurrentDateInOrgTimezone(_organizationTimezone);
-      
+      final todayStr = TimezoneHelper.getCurrentDateInOrgTimezone(
+        _organizationTimezone,
+      );
+
       // 1. Check for duplicates (for logging/internal logic)
       bool hasDuplicate = false;
       if (_isOnline) {
@@ -1043,9 +1091,11 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
               .maybeSingle();
 
           if (existingRecord != null) {
-            if (action == 'check_in' && existingRecord['actual_check_in'] != null) {
+            if (action == 'check_in' &&
+                existingRecord['actual_check_in'] != null) {
               hasDuplicate = true;
-            } else if (action == 'check_out' && existingRecord['actual_check_out'] != null) {
+            } else if (action == 'check_out' &&
+                existingRecord['actual_check_out'] != null) {
               hasDuplicate = true;
             }
           }
@@ -1063,7 +1113,9 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
       }
 
       if (hasDuplicate) {
-        debugPrint('ℹ️ Duplicate $action detected for $userName, but proceeding with log entry');
+        debugPrint(
+          'ℹ️ Duplicate $action detected for $userName, but proceeding with log entry',
+        );
       }
 
       // 2. Save to offline database
@@ -1077,33 +1129,126 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         organizationMemberId: memberId,
         userName: userName,
       );
-      
+
       await _offlineDb.insertAttendance(offlineAttendance);
       await _loadPendingSyncCount();
       debugPrint('✅ Background save complete for $userName');
-      
     } catch (e) {
       debugPrint('❌ Background processing error: $e');
     }
   }
 
+  Future<void> _openOTGSettings() async {
+    if (!Platform.isAndroid) {
+      AppSettings.openAppSettings(type: AppSettingsType.settings);
+      return;
+    }
+
+    // Direct to Main Settings (Safest & Most Consistent)
+    // Allows user to use the Search Bar to find "OTG" regardless of device brand.
+    try {
+      const intent = AndroidIntent(
+        action: 'android.settings.SETTINGS',
+        flags: [Flag.FLAG_ACTIVITY_NEW_TASK],
+      );
+      await intent.launch();
+    } catch (e) {
+      debugPrint('Main Settings Intent failed: $e');
+      // Ultimate fallback
+      AppSettings.openAppSettings(type: AppSettingsType.settings);
+    }
+  }
+
+  void _showOTGSetupPrompt() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.usb_rounded, color: Color(0xFF9333EA), size: 28),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                AppLanguage.tr('attendance.rfid.otg_title'),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 20,
+                  color: Color(0xFF4A1E79),
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          AppLanguage.tr('attendance.rfid.otg_description'),
+          style: const TextStyle(
+            fontSize: 15,
+            color: Colors.black87,
+            height: 1.5,
+          ),
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              AppLanguage.tr('attendance.rfid.later'),
+              style: TextStyle(
+                color: Colors.grey.shade600,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF9333EA),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            onPressed: () {
+              Navigator.pop(context);
+              _openOTGSettings();
+            },
+            child: Text(
+              AppLanguage.tr('attendance.rfid.activate_now'),
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _showSyncDialog() async {
     final stats = await _syncService.getSyncStats();
-    
+
     if (!mounted) return;
-    
+
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: const Text('Sinkronisasi Data'),
+        title: Text(AppLanguage.tr('attendance.rfid.sync_title')),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Total pending: ${stats['pending'] ?? 0}'),
-            Text('Berhasil: ${stats['synced'] ?? 0}'),
-            Text('Gagal: ${stats['failed'] ?? 0}'),
+            Text(
+              '${AppLanguage.tr('attendance.rfid.total_pending')}: ${stats['pending'] ?? 0}',
+            ),
+            Text(
+              '${AppLanguage.tr('attendance.rfid.success_count')}: ${stats['synced'] ?? 0}',
+            ),
+            Text(
+              '${AppLanguage.tr('attendance.rfid.failed_count')}: ${stats['failed'] ?? 0}',
+            ),
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: () async {
@@ -1111,14 +1256,14 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                 await _syncService.syncAllPendingAttendances();
                 await _loadPendingSyncCount();
               },
-              child: const Text('Mulai Sinkronisasi'),
+              child: Text(AppLanguage.tr('attendance.rfid.start_sync')),
             ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Tutup'),
+            child: Text(AppLanguage.tr('attendance.rfid.close')),
           ),
         ],
       ),
@@ -1128,39 +1273,52 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
   String _composeMemberName(Map<String, dynamic>? memberInfo) {
     final profile = memberInfo?['user_profiles'] as Map<String, dynamic>?;
     if (profile == null) {
-      debugPrint('⚠️ No user profile found, using "Anggota"');
-      return 'Anggota';
+      debugPrint('⚠️ No user profile found, using "Member"');
+      return AppLanguage.tr('attendance.rfid.member');
     }
-    
+
     final displayName = (profile['display_name'] as String?)?.trim();
     if (displayName != null && displayName.isNotEmpty) {
       return displayName;
     }
-    
+
     final first = profile['first_name'] as String? ?? '';
     final last = profile['last_name'] as String? ?? '';
     final name = '$first $last'.trim();
-    
+
     if (name.isEmpty) {
-      debugPrint('⚠️ No name found, using "Anggota"');
-      return 'Anggota';
+      debugPrint('⚠️ No name found, using "Member"');
+      return AppLanguage.tr('attendance.rfid.member');
     }
-    
+
     return name;
   }
 
   String _formatTime(DateTime? time) {
     if (time == null) return '-';
     return '${time.hour.toString().padLeft(2, '0')}:'
-           '${time.minute.toString().padLeft(2, '0')}:'
-           '${time.second.toString().padLeft(2, '0')}';
+        '${time.minute.toString().padLeft(2, '0')}:'
+        '${time.second.toString().padLeft(2, '0')}';
   }
 
   String _formatDateTime(DateTime? time) => _formatTime(time);
 
   String _formatDate(DateTime? time) {
     if (time == null) return '-';
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
     return '${time.day} ${months[time.month - 1]} ${time.year}';
   }
 
@@ -1196,6 +1354,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                 autofocus: true,
                 showCursor: false,
                 enableInteractiveSelection: false,
+                keyboardType: TextInputType.none,
                 decoration: const InputDecoration(border: InputBorder.none),
                 onSubmitted: (_) => _handleCardScan(),
               ),
@@ -1205,7 +1364,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
               child: Column(
                 children: [
                   const SizedBox(height: 20),
-                  
+
                   // 1. CLOCK & DATE HEADER
                   Center(
                     child: Row(
@@ -1291,14 +1450,18 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                                 color: Colors.white.withOpacity(0.2),
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              child: const Icon(Icons.swap_horiz, color: Colors.white, size: 24),
+                              child: const Icon(
+                                Icons.swap_horiz,
+                                color: Colors.white,
+                                size: 24,
+                              ),
                             ),
                             const SizedBox(width: 16),
                             Expanded(
                               child: Text(
-                                _selectedMode != null 
-                                  ? '${_selectedMode!['name']} - ${_attendanceMode == 'check_in' ? 'IN' : 'OUT'}'
-                                  : 'Select Shift',
+                                _selectedMode != null
+                                    ? '${_selectedMode!['name']} - ${_attendanceMode == 'check_in' ? 'IN' : 'OUT'}'
+                                    : 'Select Shift',
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 18,
@@ -1306,7 +1469,10 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                                 ),
                               ),
                             ),
-                            const Icon(Icons.chevron_right, color: Colors.white),
+                            const Icon(
+                              Icons.chevron_right,
+                              color: Colors.white,
+                            ),
                           ],
                         ),
                       ),
@@ -1334,13 +1500,15 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
                                         border: Border.all(
-                                          color: const Color(0xFF9333EA).withOpacity(0.1 * (1 - value)),
+                                          color: const Color(
+                                            0xFF9333EA,
+                                          ).withOpacity(0.1 * (1 - value)),
                                           width: 1,
                                         ),
                                       ),
                                     );
                                   },
-                                  onEnd: () => setState((){}), // Loop
+                                  onEnd: () => setState(() {}), // Loop
                                 ),
                                 // Inner Circles
                                 Container(
@@ -1348,7 +1516,9 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                                   height: 180,
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
-                                    color: const Color(0xFF9333EA).withOpacity(0.05),
+                                    color: const Color(
+                                      0xFF9333EA,
+                                    ).withOpacity(0.05),
                                   ),
                                 ),
                                 Container(
@@ -1395,19 +1565,26 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                       child: Container(
                         margin: const EdgeInsets.only(top: 24),
                         child: ListView.separated(
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 8,
+                          ),
                           itemCount: _filteredEntries.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 12),
-                          itemBuilder: (_, index) => _buildNewEntryCard(_filteredEntries[index]),
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 12),
+                          itemBuilder: (_, index) =>
+                              _buildNewEntryCard(_filteredEntries[index]),
                         ),
                       ),
                     )
                   else
-                    const SizedBox(height: 220), // Placeholder height when empty
+                    const SizedBox(
+                      height: 220,
+                    ), // Placeholder height when empty
                 ],
               ),
             ),
-            
+
             // Menu Button (Top Right)
             // Header Buttons
             Positioned(
@@ -1423,29 +1600,44 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                       backgroundColor: Colors.grey,
                       radius: 20,
                       child: IconButton(
-                        icon: const Icon(Icons.chevron_left, color: Colors.white, size: 24),
+                        icon: const Icon(
+                          Icons.chevron_left,
+                          color: Colors.white,
+                          size: 24,
+                        ),
                         onPressed: () => Navigator.pop(context),
                       ),
                     ),
-                    
-                    // Manual Check Button
-                    CircleAvatar(
-                      backgroundColor: Colors.grey,
-                      radius: 20,
-                      child: IconButton(
-                        icon: const Icon(Icons.assignment_ind_outlined, color: Colors.white, size: 22),
-                        onPressed: () {
-                           Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => ManualCheckPage(
-                                  organizationMemberId: widget.organizationMemberId,
-                                  memberData: widget.memberData,
+
+                    Row(
+                      children: [
+                        // Manual Check Button
+                        CircleAvatar(
+                          backgroundColor: Colors.grey,
+                          radius: 20,
+                          child: IconButton(
+                            icon: const Icon(
+                              Icons.assignment_ind_outlined,
+                              color: Colors.white,
+                              size: 22,
+                            ),
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => ManualCheckPage(
+                                    organizationMemberId:
+                                        widget.organizationMemberId,
+                                    memberData: widget.memberData,
+                                    initialShiftName: _workTimeMode,
+                                    sourceMode: 'RFID Kiosk',
+                                  ),
                                 ),
-                              ),
-                            );
-                        },
-                      ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -1459,10 +1651,12 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
 
   // Helper Formats
   String _formatTimeShort(DateTime time) {
-    int hour = time.hour > 12 ? time.hour - 12 : (time.hour == 0 ? 12 : time.hour);
+    int hour = time.hour > 12
+        ? time.hour - 12
+        : (time.hour == 0 ? 12 : time.hour);
     return '${hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
   }
-  
+
   String _formatAmPm(DateTime time) {
     return time.hour >= 12 ? 'PM' : 'AM';
   }
@@ -1507,7 +1701,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                 ),
               ),
               const SizedBox(height: 24),
-              
+
               ..._availableModes.map((mode) {
                 final isSelected = _selectedMode?['id'] == mode['id'];
                 return Padding(
@@ -1518,10 +1712,14 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                     child: Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: isSelected ? const Color(0xFFF3E8FF) : Colors.white,
+                        color: isSelected
+                            ? const Color(0xFFF3E8FF)
+                            : Colors.white,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: isSelected ? const Color(0xFF9333EA) : Colors.grey.shade200,
+                          color: isSelected
+                              ? const Color(0xFF9333EA)
+                              : Colors.grey.shade200,
                           width: isSelected ? 2 : 1,
                         ),
                       ),
@@ -1530,12 +1728,16 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                           Container(
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
-                              color: isSelected ? const Color(0xFF9333EA).withOpacity(0.1) : Colors.grey.shade100,
+                              color: isSelected
+                                  ? const Color(0xFF9333EA).withOpacity(0.1)
+                                  : Colors.grey.shade100,
                               shape: BoxShape.circle,
                             ),
                             child: Icon(
                               _getIconForMode(mode['name'] ?? ''),
-                              color: isSelected ? const Color(0xFF9333EA) : Colors.grey,
+                              color: isSelected
+                                  ? const Color(0xFF9333EA)
+                                  : Colors.grey,
                               size: 20,
                             ),
                           ),
@@ -1549,10 +1751,13 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 16,
-                                    color: isSelected ? Colors.black : Colors.black87,
+                                    color: isSelected
+                                        ? Colors.black
+                                        : Colors.black87,
                                   ),
                                 ),
-                                if (mode['start_time'] != null && mode['end_time'] != null)
+                                if (mode['start_time'] != null &&
+                                    mode['end_time'] != null)
                                   Text(
                                     '${mode['start_time']} - ${mode['end_time']}',
                                     style: TextStyle(
@@ -1570,10 +1775,14 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                                 color: Color(0xFF9333EA),
                                 shape: BoxShape.circle,
                               ),
-                              child: const Icon(Icons.check, color: Colors.white, size: 14),
+                              child: const Icon(
+                                Icons.check,
+                                color: Colors.white,
+                                size: 14,
+                              ),
                             )
                           else
-                             Container(
+                            Container(
                               width: 24,
                               height: 24,
                               decoration: BoxDecoration(
@@ -1588,33 +1797,6 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                 );
               }),
 
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () {
-                     // Just close for now, selection handles closure
-                     Navigator.pop(context);
-                  }, 
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF9333EA),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    elevation: 5,
-                    shadowColor: const Color(0xFF9333EA).withOpacity(0.4),
-                  ),
-                  child: const Text(
-                    'Confirm Selection',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
               const SizedBox(height: 16),
             ],
           ),
@@ -1625,38 +1807,44 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
     if (selected != null && mounted) {
       setState(() {
         _selectedMode = selected;
-        _workTimeMode = selected['code'] as String? ?? selected['name'] as String?;
+        _workTimeMode =
+            selected['code'] as String? ?? selected['name'] as String?;
       });
       // Optionally show IN/OUT selector if needed, or default to IN if not specified
       // For this UI, user just selects shift. The actual action (IN/OUT) usually inferred or separate toggles?
       // User request didn't specify IN/OUT buttons, just "Select Shift".
-      // Assuming 'check_in' as default or handled elsewhere. 
+      // Assuming 'check_in' as default or handled elsewhere.
       // Re-using _showInOutSelector if we want to confirm action
-      await _showInOutSelector(); 
+      await _showInOutSelector();
     }
   }
 
   IconData _getIconForMode(String name) {
     name = name.toLowerCase();
-    if (name.contains('morning') || name.contains('pagi')) return Icons.wb_sunny_outlined;
-    if (name.contains('afternoon') || name.contains('siang')) return Icons.wb_twilight;
-    if (name.contains('night') || name.contains('malam')) return Icons.nights_stay_outlined;
+    if (name.contains('morning') || name.contains('pagi'))
+      return Icons.wb_sunny_outlined;
+    if (name.contains('afternoon') || name.contains('siang'))
+      return Icons.wb_twilight;
+    if (name.contains('night') || name.contains('malam'))
+      return Icons.nights_stay_outlined;
     return Icons.schedule;
   }
 
-
   Widget _buildNewEntryCard(_AttendanceEntry entry) {
-     final profile = entry.memberInfo['user_profiles'] as Map<String, dynamic>? ?? {};
+    final profile =
+        entry.memberInfo['user_profiles'] as Map<String, dynamic>? ?? {};
     final photoPath = profile['profile_photo_url'] as String?;
     final name = _composeMemberName(entry.memberInfo);
-    
+
     ImageProvider? imageProvider;
     if (photoPath != null && photoPath.isNotEmpty) {
-       if (photoPath.startsWith('http')) {
+      if (photoPath.startsWith('http')) {
         imageProvider = NetworkImage(photoPath);
       } else {
         imageProvider = NetworkImage(
-          _supabase.storage.from('profile-photos').getPublicUrl('mass-profile/$photoPath'),
+          _supabase.storage
+              .from('profile-photos')
+              .getPublicUrl('mass-profile/$photoPath'),
         );
       }
     }
@@ -1670,11 +1858,13 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
       ),
       child: Row(
         children: [
-           CircleAvatar(
+          CircleAvatar(
             radius: 24,
             backgroundColor: Colors.grey.shade300,
             backgroundImage: imageProvider,
-            child: imageProvider == null ? const Icon(Icons.person, color: Colors.grey) : null,
+            child: imageProvider == null
+                ? const Icon(Icons.person, color: Colors.grey)
+                : null,
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -1690,24 +1880,65 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                   ),
                 ),
                 Text(
-                  entry.memberInfo['departments']?['name'] as String? ?? 'No Department',
-                  style: TextStyle(
-                    color: Colors.grey.shade500,
-                    fontSize: 13,
-                  ),
+                  entry.memberInfo['departments']?['name'] as String? ??
+                      'No Department',
+                  style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
                 ),
               ],
             ),
           ),
-          Text(
-            // Format: 09:00 - 17:00 (Check In - Check Out expectation?)
-            // Just showing timestamp for now as per entry
-             _formatTimeShort(entry.timestamp),
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF9333EA),
-              fontSize: 14,
-            ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                // Format: 09:00 - 17:00
+                _formatTimeShort(entry.timestamp),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF9333EA),
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(height: 4),
+              if (entry.workTimeMode != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: Colors.blue.shade200),
+                  ),
+                  child: Text(
+                    entry.workTimeMode!,
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue.shade700,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 2),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: Text(
+                  entry.method.toUpperCase(),
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey.shade600,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -1722,6 +1953,7 @@ class _AttendanceEntry {
   final String action;
   final DateTime timestamp;
   final String? workTimeMode;
+  final String method;
 
   _AttendanceEntry({
     required this.memberId,
@@ -1730,5 +1962,6 @@ class _AttendanceEntry {
     required this.action,
     required this.timestamp,
     this.workTimeMode,
+    this.method = 'RFID',
   });
 }

@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../helpers/timezone_helper.dart';
 import '../../helpers/rfid_mode_helper.dart';
@@ -10,7 +12,10 @@ import 'petugas_members_page.dart';
 import 'petugas_records_page.dart';
 import 'petugas_profile_page.dart';
 import '../../attendance/screens/rfid_attendance_page.dart';
-import '../../attendance/screens/manual_check_page.dart';
+import '../../User/screens/user_dashboard.dart'; // ✅ Added for organization switcher
+import 'selfie_attendance_flow_page.dart';
+import '../../auth/screens/join_organization_screen.dart'; // ✅ Added for Join Organization option
+import '../../helpers/language_helper.dart';
 
 class PetugasDashboardPage extends StatefulWidget {
   final int organizationMemberId;
@@ -58,6 +63,11 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
   double _weeklyPercentageChange = 0.0;
   List<double> _dailyHours = [0.0, 0.0, 0.0, 0.0, 0.0]; // Mon-Fri
 
+  // Real-time updates
+  Timer? _clockTimer;
+  StreamSubscription? _activitySubscription;
+  DateTime _nowUtc = DateTime.now().toUtc();
+
   @override
   void initState() {
     super.initState();
@@ -66,12 +76,62 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
     debugPrint('Role: ${_roleService.getRoleName(widget.memberData)}');
     _userProfile = widget.userProfile;
     _isDarkMode = widget.isDarkMode;
+
+    // Log memberships for debugging
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId != null) {
+      _roleService.getAllOrganizationMembersWithRoles(userId).then((list) {
+        debugPrint(
+          '🕵️ DEBUG: User has ${list.length} organization memberships.',
+        );
+        for (var m in list) {
+          debugPrint(
+            '  - Org: ${m['organizations']?['name']}, Role: ${m['system_roles']?['name']}',
+          );
+        }
+      });
+    }
+
     _loadUserProfile();
     _loadOrganizationTimezone();
     _loadOrganizationInfo();
     _loadAttendanceMode();
     _refreshAll();
     _loadWeeklyOverview();
+    _initRealTimeClock();
+    _initActivityStream();
+  }
+
+  void _initRealTimeClock() {
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted) {
+        setState(() {
+          _nowUtc = DateTime.now().toUtc();
+        });
+      }
+    });
+  }
+
+  void _initActivityStream() {
+    final organizationId = widget.memberData['organization_id'] as int?;
+    if (organizationId == null) return;
+
+    // Listen to attendance_logs for real-time updates
+    _activitySubscription = _supabase
+        .from('attendance_logs')
+        .stream(primaryKey: ['id'])
+        .order('event_time')
+        .listen((data) {
+          debugPrint('📡 Real-time update detected in attendance_logs');
+          _refreshAll();
+        });
+  }
+
+  @override
+  void dispose() {
+    _clockTimer?.cancel();
+    _activitySubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadUserProfile() async {
@@ -180,7 +240,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
     if (organizationId == null) {
       setState(() {
         _isLoadingStats = false;
-        _errorMessage = 'Organization data not found';
+        _errorMessage = AppLanguage.tr('organization_data_not_found');
       });
       return;
     }
@@ -222,9 +282,10 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
               errorString.contains('network is unreachable') ||
               errorString.contains('connection refused') ||
               errorString.contains('connection timed out')) {
-            _errorMessage = 'Tidak ada koneksi internet';
+            _errorMessage = AppLanguage.tr('no_internet_connection');
           } else {
-            _errorMessage = 'Failed to load statistics: $e';
+            _errorMessage =
+                '${AppLanguage.tr('failed_to_load_statistics')}: $e';
           }
         });
       }
@@ -233,7 +294,40 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
 
   Future<void> _refreshAll() async {
     debugPrint('=== REFRESHING ALL DATA ===');
-    await Future.wait([_loadTodayStats(), _loadRecentActivities()]);
+    _loadTodayStats();
+    _loadRecentActivities();
+    _loadWeeklyOverview();
+  }
+
+  String _composeUserName(Map<String, dynamic>? profile) {
+    if (profile == null) return AppLanguage.tr('unknown_user');
+    final displayName = profile['display_name'] as String?;
+    if (displayName != null && displayName.trim().isNotEmpty) {
+      return displayName.trim();
+    }
+    final firstName = profile['first_name'] as String? ?? '';
+    final lastName = profile['last_name'] as String? ?? '';
+    final fullName = '$firstName $lastName'.trim();
+    return fullName.isEmpty ? AppLanguage.tr('unknown_user') : fullName;
+  }
+
+  String? _resolveProfilePhotoUrl(String? storedPath) {
+    if (storedPath == null || storedPath.trim().isEmpty) return null;
+    if (storedPath.startsWith('http://') || storedPath.startsWith('https://')) {
+      return storedPath;
+    }
+
+    final normalizedPath = storedPath.startsWith('mass-profile/')
+        ? storedPath
+        : 'mass-profile/$storedPath';
+
+    try {
+      return Supabase.instance.client.storage
+          .from('profile-photos')
+          .getPublicUrl(normalizedPath);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _loadRecentActivities() async {
@@ -241,7 +335,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
     if (organizationId == null) {
       setState(() {
         _isLoadingActivities = false;
-        _errorMessage = 'Organization data not found';
+        _errorMessage = AppLanguage.tr('organization_data_not_found');
       });
       return;
     }
@@ -250,22 +344,42 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
     setState(() => _isLoadingActivities = true);
 
     try {
-      final activities = await _attendanceService.getOrganizationRecentActivities(
-        organizationId: organizationId,
-        limit: 10,
-      );
+      final activities = await _attendanceService
+          .getOrganizationRecentActivities(
+            organizationId: organizationId,
+            limit: 10,
+          );
 
       if (!mounted) return;
 
       final groupedActivities = <String, Map<String, dynamic>>{};
 
       for (final activity in activities) {
-        final member = activity['organization_members'] as Map<String, dynamic>? ?? {};
+        final member =
+            activity['organization_members'] as Map<String, dynamic>? ?? {};
         final profile = member['user_profiles'] as Map<String, dynamic>? ?? {};
         final department = member['departments'] as Map<String, dynamic>? ?? {};
-        final record = activity['attendance_records'] as Map<String, dynamic>? ?? {};
+        final record =
+            activity['attendance_records'] as Map<String, dynamic>? ?? {};
+        final rawData = activity['raw_data'] as Map<String, dynamic>? ?? {};
 
-        final memberId = member['id']?.toString() ?? activity['organization_member_id']?.toString() ?? '';
+        // Try to get shift name
+        String? shiftName = rawData['shift_name']?.toString();
+        if (shiftName == null) {
+          final wtm = rawData['work_time_mode']?.toString();
+          if (wtm != null && !wtm.startsWith('{')) {
+            shiftName = wtm;
+          }
+        }
+        // Also try schedule name
+        if (shiftName == null) {
+          shiftName = rawData['schedule_name']?.toString();
+        }
+
+        final memberId =
+            member['id']?.toString() ??
+            activity['organization_member_id']?.toString() ??
+            '';
         DateTime? eventTime;
         final eventTimeStr = activity['event_time'] as String?;
         if (eventTimeStr != null) {
@@ -275,15 +389,20 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
           );
         }
 
-        final attendanceDate = (record['attendance_date'] as String?) ??
+        final attendanceDate =
+            (record['attendance_date'] as String?) ??
             (eventTimeStr != null ? eventTimeStr.split('T').first : '');
         final key = '$memberId-$attendanceDate';
 
         final entry = groupedActivities.putIfAbsent(key, () {
           return {
             'name': _composeUserName(profile),
-            'photoUrl': _resolveProfilePhotoUrl(profile['profile_photo_url'] as String?),
-            'department': department['name'] as String? ?? 'No Department',
+            'photoUrl': _resolveProfilePhotoUrl(
+              profile['profile_photo_url'] as String?,
+            ),
+            'department':
+                department['name'] as String? ??
+                AppLanguage.tr('no_department'),
             'status': record['status'] as String?,
             'checkInTime': null,
             'checkOutTime': null,
@@ -292,12 +411,13 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
             'lastAction': null,
             'method': null,
             'lastUpdated': null,
+            'shiftName': shiftName,
           };
         });
 
         if (activity['event_type'] == 'check_in') {
           // If multiple check-ins, usually we want the EARLIEST for the "Check In" slot,
-          // but since the loop is NEWEST to OLDEST (DESC), we overwrite to let the 
+          // but since the loop is NEWEST to OLDEST (DESC), we overwrite to let the
           // last iteration (oldest) win for earliest check-in time.
           entry['checkInTime'] = eventTime;
           entry['checkInMethod'] = activity['method'];
@@ -316,8 +436,12 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
 
       final mappedActivities = groupedActivities.values.toList()
         ..sort((a, b) {
-          final aTime = a['lastUpdated'] as DateTime? ?? DateTime.fromMillisecondsSinceEpoch(0);
-          final bTime = b['lastUpdated'] as DateTime? ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final aTime =
+              a['lastUpdated'] as DateTime? ??
+              DateTime.fromMillisecondsSinceEpoch(0);
+          final bTime =
+              b['lastUpdated'] as DateTime? ??
+              DateTime.fromMillisecondsSinceEpoch(0);
           return bTime.compareTo(aTime);
         });
 
@@ -330,28 +454,31 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
     } catch (e) {
       debugPrint('!!! ERROR loading recent activities: $e');
       if (!mounted) return;
-      
+
       // Check if it's a network/connection error
       final errorString = e.toString().toLowerCase();
-      final isNetworkError = errorString.contains('socketexception') ||
+      final isNetworkError =
+          errorString.contains('socketexception') ||
           errorString.contains('failed host lookup') ||
           errorString.contains('no address associated with hostname') ||
           errorString.contains('network is unreachable') ||
           errorString.contains('connection refused') ||
           errorString.contains('connection timed out');
-      
+
       setState(() {
         _isLoadingActivities = false;
         if (isNetworkError) {
-          _errorMessage ??= 'Tidak ada koneksi internet';
+          _errorMessage ??= AppLanguage.tr('no_internet_connection');
         } else {
-          _errorMessage ??= 'Failed to load recent activities: $e';
+          _errorMessage ??=
+              '${AppLanguage.tr('failed_to_load_recent_activities')}: $e';
         }
       });
       setState(() {
         _isLoadingActivities = false;
         _recentActivities = [];
-        _errorMessage ??= 'Failed to load recent activities: $e';
+        _errorMessage ??=
+            '${AppLanguage.tr('failed_to_load_recent_activities')}: $e';
       });
     }
   }
@@ -373,11 +500,11 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
       // Get current week (Monday to Friday)
       final now = DateTime.now();
       final currentWeekday = now.weekday; // 1 = Monday, 7 = Sunday
-      
+
       // Calculate Monday of current week
       final monday = now.subtract(Duration(days: currentWeekday - 1));
       final mondayStr = monday.toIso8601String().split('T')[0];
-      
+
       // Calculate Friday of current week
       final friday = monday.add(const Duration(days: 4));
       final fridayStr = friday.toIso8601String().split('T')[0];
@@ -426,13 +553,14 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
       for (final record in currentWeekRecords as List) {
         final dateStr = record['attendance_date'] as String?;
         final minutes = record['work_duration_minutes'] as int?;
-        
+
         if (dateStr != null && minutes != null && minutes > 0) {
           final date = DateTime.parse(dateStr);
           final weekday = date.weekday;
-          
+
           if (weekday >= 1 && weekday <= 5) {
-            dailyHoursMap[weekday] = (dailyHoursMap[weekday] ?? 0.0) + (minutes / 60.0);
+            dailyHoursMap[weekday] =
+                (dailyHoursMap[weekday] ?? 0.0) + (minutes / 60.0);
             totalMinutes += minutes;
           }
         }
@@ -450,9 +578,11 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
       // Calculate percentage change
       double percentageChange = 0.0;
       if (lastWeekMinutes > 0) {
-        percentageChange = ((totalMinutes - lastWeekMinutes) / lastWeekMinutes) * 100;
+        percentageChange =
+            ((totalMinutes - lastWeekMinutes) / lastWeekMinutes) * 100;
       } else if (totalMinutes > 0) {
-        percentageChange = 100.0; // If no data last week but have data this week
+        percentageChange =
+            100.0; // If no data last week but have data this week
       }
 
       if (mounted) {
@@ -470,7 +600,9 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
         });
       }
 
-      debugPrint('Weekly overview loaded: ${_totalWeeklyHours.toStringAsFixed(1)} hrs, ${_weeklyPercentageChange.toStringAsFixed(1)}% change');
+      debugPrint(
+        'Weekly overview loaded: ${_totalWeeklyHours.toStringAsFixed(1)} hrs, ${_weeklyPercentageChange.toStringAsFixed(1)}% change',
+      );
     } catch (e) {
       debugPrint('!!! ERROR loading weekly overview: $e');
       if (mounted) {
@@ -487,7 +619,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
 
       if (organizationId == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Organization ID not found')),
+          SnackBar(content: Text(AppLanguage.tr('organization_id_not_found'))),
         );
         return;
       }
@@ -509,7 +641,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
       debugPrint('Error navigating to multi-user face attendance: $e');
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      ).showSnackBar(SnackBar(content: Text('${AppLanguage.tr('error')}: $e')));
     }
   }
 
@@ -519,7 +651,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
     if (organizationId != null) {
       _attendanceMode = await RfidModeHelper.getAttendanceMode(organizationId);
     }
-    
+
     if (_attendanceMode == 'rfid') {
       Navigator.push(
         context,
@@ -534,17 +666,280 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
         _refreshAll();
       });
       return;
+    } else if (_attendanceMode == 'selfie') {
+      // Navigate to selfie attendance flow - always use self-attendance mode from dashboard button
+      _handleSelfAttendance();
+      return;
     } else if (_attendanceMode == 'fingerprint') {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Fingerprint attendance is coming soon!'),
+        SnackBar(
+          content: Text(AppLanguage.tr('fingerprint_coming_soon')),
           backgroundColor: Colors.orange,
         ),
       );
-      return;
+    } else if (_attendanceMode == 'face') {
+      _navigateToMultiUserFaceAttendance(null);
     }
+  }
 
-    _navigateToMultiUserFaceAttendance(null);
+  void _handleSelfAttendance() {
+    final organizationId = widget.memberData['organization_id'] as int?;
+    if (organizationId == null) return;
+
+    final orgName = _organization?['name'] ?? AppLanguage.tr('organization');
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SelfieAttendanceFlowPage(
+          organizationId: organizationId,
+          organizationName: orgName,
+          petugasData: widget.memberData,
+          isSelfAttendance: true,
+        ),
+      ),
+    ).then((result) {
+      if (result != null && result['success'] == true) {
+        _refreshAll();
+      }
+    });
+  }
+
+  Future<void> _showOrganizationSwitcher() async {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => _buildOrganizationSwitcherSheet(),
+    );
+  }
+
+  Widget _buildOrganizationSwitcherSheet() {
+    return Container(
+      decoration: BoxDecoration(
+        color: _isDarkMode ? const Color(0xFF1F0B38) : Colors.white,
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(28),
+          topRight: Radius.circular(28),
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: _isDarkMode ? Colors.white24 : Colors.grey.shade300,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                AppLanguage.tr('switch_organization'),
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: _isDarkMode ? Colors.white : const Color(0xFF1F2937),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          FutureBuilder<List<Map<String, dynamic>>>(
+            future: _roleService.getAllOrganizationMembersWithRoles(
+              _supabase.auth.currentUser!.id,
+            ),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(20),
+                    child: CircularProgressIndicator(),
+                  ),
+                );
+              }
+
+              final memberships = snapshot.data ?? [];
+
+              return Column(
+                children: [
+                  ...memberships.map((membership) {
+                    final organization = membership['organizations'];
+                    final roleName = _roleService.getRoleName(membership);
+                    final isActive =
+                        membership['id'] == widget.organizationMemberId;
+
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.pop(context); // Close switcher
+                          if (isActive) return;
+
+                          // Navigate to new dashboard based on role
+                          if (_roleService.isPetugas(membership)) {
+                            Navigator.pushReplacement(
+                              context,
+                              PageRouteBuilder(
+                                pageBuilder:
+                                    (context, animation, secondaryAnimation) =>
+                                        PetugasDashboardPage(
+                                          organizationMemberId:
+                                              membership['id'] as int,
+                                          memberData: membership,
+                                          userProfile: _userProfile,
+                                          isDarkMode: _isDarkMode,
+                                        ),
+                                transitionsBuilder:
+                                    (
+                                      context,
+                                      animation,
+                                      secondaryAnimation,
+                                      child,
+                                    ) {
+                                      return FadeTransition(
+                                        opacity: animation,
+                                        child: child,
+                                      );
+                                    },
+                              ),
+                            );
+                          } else {
+                            Navigator.pushReplacement(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => UserDashboardPage(
+                                  organizationMemberId: membership['id'] as int,
+                                  memberData: membership,
+                                  isDarkMode: _isDarkMode,
+                                ),
+                              ),
+                            );
+                          }
+                        },
+                        borderRadius: BorderRadius.circular(16),
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: isActive
+                                ? const Color(
+                                    0xFF4A1E79,
+                                  ).withOpacity(_isDarkMode ? 0.3 : 0.05)
+                                : (_isDarkMode
+                                      ? const Color(0xFF2D1B4E)
+                                      : Colors.white),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: isActive
+                                  ? const Color(0xFF8938DF)
+                                  : (_isDarkMode
+                                        ? Colors.white12
+                                        : Colors.grey.shade200),
+                              width: isActive ? 2 : 1,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  color: isActive
+                                      ? const Color(0xFF4A1E79)
+                                      : (_isDarkMode
+                                            ? Colors.white10
+                                            : Colors.grey.shade100),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Center(
+                                  child: Icon(
+                                    Icons.business,
+                                    color: Colors.white,
+                                    size: 22,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      organization['name'] ??
+                                          AppLanguage.tr('unknown_org'),
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: _isDarkMode
+                                            ? Colors.white
+                                            : const Color(0xFF1F2937),
+                                      ),
+                                    ),
+                                    Text(
+                                      roleName.toUpperCase(),
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: _isDarkMode
+                                            ? Colors.white60
+                                            : Colors.grey.shade500,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (isActive)
+                                const Icon(
+                                  Icons.check_circle,
+                                  color: Color(0xFF8938DF),
+                                  size: 24,
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                  const Divider(height: 32),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context); // Close switcher
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const JoinOrganizationScreen(
+                              fromDashboard: true,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.add_business_rounded),
+                      label: Text(AppLanguage.tr('join_new_organization')),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF4A1E79),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        elevation: 0,
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
   }
 
   void _handleNavigation(int index) {
@@ -564,7 +959,9 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
             transitionDuration: Duration.zero,
             reverseTransitionDuration: Duration.zero,
             pageBuilder: (context, _, __) => Container(
-              color: _isDarkMode ? const Color(0xFF1F0B38) : const Color(0xFFF8F9FA),
+              color: _isDarkMode
+                  ? const Color(0xFF1F0B38)
+                  : const Color(0xFFF8F9FA),
               child: PetugasMembersPage(
                 organizationMemberId: widget.organizationMemberId,
                 memberData: widget.memberData,
@@ -587,7 +984,9 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
             transitionDuration: Duration.zero,
             reverseTransitionDuration: Duration.zero,
             pageBuilder: (context, _, __) => Container(
-              color: _isDarkMode ? const Color(0xFF1F0B38) : const Color(0xFFF8F9FA),
+              color: _isDarkMode
+                  ? const Color(0xFF1F0B38)
+                  : const Color(0xFFF8F9FA),
               child: PetugasRecordsPage(
                 organizationMemberId: widget.organizationMemberId,
                 memberData: widget.memberData,
@@ -610,7 +1009,9 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
             transitionDuration: Duration.zero,
             reverseTransitionDuration: Duration.zero,
             pageBuilder: (context, _, __) => Container(
-              color: _isDarkMode ? const Color(0xFF1F0B38) : const Color(0xFFF8F9FA),
+              color: _isDarkMode
+                  ? const Color(0xFF1F0B38)
+                  : const Color(0xFFF8F9FA),
               child: PetugasProfilePage(
                 organizationMemberId: widget.organizationMemberId,
                 memberData: widget.memberData,
@@ -633,30 +1034,10 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
 
   String _getCurrentDate() {
     final now = DateTime.now();
-    final weekday = [
-      'Monday',
-      'Tuesday',
-      'Wednesday',
-      'Thursday',
-      'Friday',
-      'Saturday',
-      'Sunday',
-    ][now.weekday - 1];
-    final month = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
-    ][now.month - 1];
-    return '$weekday, ${now.day} $month ${now.year}';
+    return DateFormat(
+      'EEEE, dd MMM yyyy',
+      AppLanguage.currentLanguage == 'id' ? 'id_ID' : 'en_US',
+    ).format(now);
   }
 
   String _getFullName() {
@@ -682,7 +1063,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
   }
 
   String _getEmail() {
-    return _supabase.auth.currentUser?.email ?? 'No email';
+    return _supabase.auth.currentUser?.email ?? AppLanguage.tr('no_email');
   }
 
   String? _getProfilePhotoUrl() {
@@ -706,59 +1087,26 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
         .getPublicUrl('mass-profile/$photoPath');
   }
 
-  String _composeUserName(Map<String, dynamic>? profile) {
-    if (profile == null) return 'Unknown User';
-    final displayName = profile['display_name'] as String?;
-    if (displayName != null && displayName.trim().isNotEmpty) {
-      return displayName.trim();
-    }
-    final firstName = profile['first_name'] as String? ?? '';
-    final lastName = profile['last_name'] as String? ?? '';
-    final fullName = '$firstName $lastName'.trim();
-    return fullName.isEmpty ? 'Unknown User' : fullName;
-  }
-
-  String? _resolveProfilePhotoUrl(String? storedPath) {
-    if (storedPath == null || storedPath.trim().isEmpty) return null;
-    if (storedPath.startsWith('http://') || storedPath.startsWith('https://')) {
-      return storedPath;
-    }
-
-    final normalizedPath = storedPath.startsWith('mass-profile/')
-        ? storedPath
-        : 'mass-profile/$storedPath';
-
-    try {
-      return _supabase.storage
-          .from('profile-photos')
-          .getPublicUrl(normalizedPath);
-    } catch (_) {
-      return null;
-    }
-  }
-
   String _formatEventType(String? type) {
     switch (type) {
       case 'check_in':
-        return 'Check In';
+        return AppLanguage.tr('check_in');
       case 'check_out':
-        return 'Check Out';
+        return AppLanguage.tr('check_out');
       default:
-        if (type == null) return 'Activity';
+        if (type == null) return AppLanguage.tr('activity');
         return type.replaceAll('_', ' ').toUpperCase();
     }
   }
 
   String _formatEventTime(DateTime? time) {
-    if (time == null) return 'Unknown time';
+    if (time == null) return AppLanguage.tr('unknown_time');
 
     final nowUtc = DateTime.now().toUtc();
-    final nowOrg =
-        TimezoneHelper.parseAndConvert(
-          nowUtc.toIso8601String(),
-          _organizationTimezone,
-        ) ??
-        nowUtc;
+    final nowOrg = TimezoneHelper.convertUtcToOrgTimezone(
+      nowUtc,
+      _organizationTimezone,
+    );
 
     final isToday =
         nowOrg.year == time.year &&
@@ -770,7 +1118,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
     final timeStr = '$hour:$minute';
 
     if (isToday) {
-      return 'Today • $timeStr';
+      return '${AppLanguage.tr('today')} • $timeStr';
     }
 
     final dateStr = '${time.day}/${time.month}/${time.year}';
@@ -786,13 +1134,18 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final hour = now.hour.toString().padLeft(2, '0');
-    final minute = now.minute.toString().padLeft(2, '0');
+    final nowOrg = TimezoneHelper.convertUtcToOrgTimezone(
+      _nowUtc,
+      _organizationTimezone,
+    );
+    final hour = nowOrg.hour.toString().padLeft(2, '0');
+    final minute = nowOrg.minute.toString().padLeft(2, '0');
     final currentTime = '$hour:$minute';
-    
+
     return Scaffold(
-      backgroundColor: _isDarkMode ? const Color(0xFF1F0B38) : const Color(0xFFF5F5F5),
+      backgroundColor: _isDarkMode
+          ? const Color(0xFF1F0B38)
+          : const Color(0xFFF5F5F5),
       body: RefreshIndicator(
         onRefresh: _refreshAll,
         child: SingleChildScrollView(
@@ -835,10 +1188,15 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                             ),
                           ),
                           Transform.translate(
-                            offset: const Offset(0, -16), // Shift up to align with logo
+                            offset: const Offset(
+                              0,
+                              -16,
+                            ), // Shift up to align with logo
                             child: IconButton(
                               icon: Icon(
-                                _isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_outlined,
+                                _isDarkMode
+                                    ? Icons.light_mode_rounded
+                                    : Icons.dark_mode_outlined,
                                 color: Colors.white,
                                 size: 26,
                               ),
@@ -859,49 +1217,63 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                         children: [
                           // Profile Photo
                           Container(
-                            width: 120,
-                            height: 120,
+                            width: 110,
+                            height: 110,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              gradient: LinearGradient(
-                                colors: _isDarkMode
-                                    ? [const Color(0xFFD0BCFF), const Color(0xFF8938DF)]
-                                    : [const Color(0xFF8938DF), const Color(0xFF4A1E79)],
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                              ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.2),
-                                  blurRadius: 20,
-                                  offset: const Offset(0, 10),
+                                  color: Colors.black.withOpacity(0.2),
+                                  blurRadius: 15,
+                                  offset: const Offset(0, 8),
                                 ),
                               ],
                             ),
                             child: ClipOval(
-                              child: _getProfilePhotoUrl() != null
-                                  ? Image.network(
-                                      _getProfilePhotoUrl()!,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (context, error, stackTrace) {
-                                        return const Icon(
-                                          Icons.person,
-                                          size: 60,
-                                          color: Colors.white,
-                                        );
-                                      },
-                                    )
-                                  : const Icon(
-                                      Icons.person,
-                                      size: 60,
-                                      color: Colors.white,
-                                    ),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  gradient: LinearGradient(
+                                    colors: _isDarkMode
+                                        ? [
+                                            const Color(0xFFD0BCFF),
+                                            const Color(0xFF8938DF),
+                                          ]
+                                        : [
+                                            const Color(0xFF8938DF),
+                                            const Color(0xFF4A1E79),
+                                          ],
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                  ),
+                                ),
+                                child: _getProfilePhotoUrl() != null
+                                    ? Image.network(
+                                        _getProfilePhotoUrl()!,
+                                        fit: BoxFit.cover,
+                                        errorBuilder:
+                                            (context, error, stackTrace) {
+                                              return const Icon(
+                                                Icons.person,
+                                                size: 40,
+                                                color: Colors.white,
+                                              );
+                                            },
+                                      )
+                                    : const Icon(
+                                        Icons.person,
+                                        size: 40,
+                                        color: Colors.white,
+                                      ),
+                              ),
                             ),
                           ),
                           const SizedBox(height: 12),
                           // Name
                           Text(
-                            _getFullName().isNotEmpty ? _getFullName() : 'User',
+                            _getFullName().isNotEmpty
+                                ? _getFullName()
+                                : AppLanguage.tr('user'),
                             style: const TextStyle(
                               fontSize: 24,
                               fontWeight: FontWeight.bold,
@@ -910,13 +1282,56 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                           ),
                           const SizedBox(height: 6),
                           // Role and Organization
-                          Text(
-                            '${_roleService.getRoleName(widget.memberData)}${_organization != null ? ' - ${_organization!['name']}' : ''}',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.white.withValues(alpha: 0.9),
+                          Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () {
+                                debugPrint(
+                                  '🏢 HEADER Organization Switcher tapped!',
+                                );
+                                _showOrganizationSwitcher();
+                              },
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: Colors.white.withOpacity(0.2),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        '${_roleService.getRoleName(widget.memberData)}${_organization != null ? ' - ${_organization!['name']}' : ''}',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                          color: Colors.white.withOpacity(0.95),
+                                        ),
+                                        textAlign: TextAlign.center,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Icon(
+                                      Icons.keyboard_arrow_down_rounded,
+                                      color: Colors.white.withOpacity(0.8),
+                                      size: 18,
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
-                            textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 8),
                           // Date
@@ -926,7 +1341,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                               vertical: 8,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.2),
+                              color: Colors.white.withOpacity(0.2),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Row(
@@ -959,7 +1374,9 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
               // WHITE CONTENT AREA
               Container(
                 decoration: BoxDecoration(
-                  color: _isDarkMode ? const Color(0xFF1F0B38) : const Color(0xFFF5F5F5),
+                  color: _isDarkMode
+                      ? const Color(0xFF1F0B38)
+                      : const Color(0xFFF5F5F5),
                   borderRadius: const BorderRadius.only(
                     topLeft: Radius.circular(32),
                     topRight: Radius.circular(32),
@@ -975,11 +1392,13 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                         child: Container(
                           padding: const EdgeInsets.all(20),
                           decoration: BoxDecoration(
-                            color: _isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
+                            color: _isDarkMode
+                                ? const Color(0xFF2D1B4E)
+                                : Colors.white,
                             borderRadius: BorderRadius.circular(16),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.1),
+                                color: Colors.black.withOpacity(0.1),
                                 blurRadius: 20,
                                 offset: const Offset(0, 10),
                               ),
@@ -993,22 +1412,27 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                                 children: [
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
-                                          'Current Time',
+                                          AppLanguage.tr('current_time'),
                                           style: TextStyle(
                                             fontSize: 12,
-                                            color: _isDarkMode ? Colors.white70 : Colors.grey.shade600,
+                                            color: _isDarkMode
+                                                ? Colors.white70
+                                                : Colors.grey.shade600,
                                           ),
                                         ),
                                         const SizedBox(height: 4),
                                         Text(
-                                          '$currentTime ${now.hour < 12 ? 'AM' : 'PM'}',
+                                          '$currentTime ${nowOrg.hour < 12 ? AppLanguage.tr('am') : AppLanguage.tr('pm')}',
                                           style: TextStyle(
                                             fontSize: 28,
                                             fontWeight: FontWeight.bold,
-                                            color: _isDarkMode ? Colors.white : const Color(0xFF4A1E79),
+                                            color: _isDarkMode
+                                                ? Colors.white
+                                                : const Color(0xFF4A1E79),
                                           ),
                                         ),
                                       ],
@@ -1018,39 +1442,67 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                                     width: 1,
                                     height: 45,
                                     margin: const EdgeInsets.only(top: 10),
-                                    color: _isDarkMode ? Colors.white24 : Colors.grey.shade200,
+                                    color: _isDarkMode
+                                        ? Colors.white24
+                                        : Colors.grey.shade200,
                                   ),
                                   const SizedBox(width: 16),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
-                                        Text(
-                                          'Office Location',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: _isDarkMode ? Colors.white70 : Colors.grey.shade600,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Row(
+                                        Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
-                                            Icon(
-                                              Icons.location_on,
-                                              color: _isDarkMode ? const Color(0xFFD0BCFF) : const Color(0xFF4A1E79),
-                                              size: 16,
-                                            ),
-                                            const SizedBox(width: 4),
-                                            Expanded(
-                                              child: Text(
-                                                _organization?['name'] ?? 'Office',
-                                                style: TextStyle(
-                                                  fontSize: 14,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: _isDarkMode ? const Color(0xFFD0BCFF) : Colors.black87,
+                                            Row(
+                                              children: [
+                                                Text(
+                                                  AppLanguage.tr(
+                                                    'Petugas.dashboard.office_location',
+                                                  ),
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                    color: _isDarkMode
+                                                        ? Colors.white70
+                                                        : Colors.grey.shade600,
+                                                  ),
                                                 ),
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 6),
+                                            Row(
+                                              children: [
+                                                Icon(
+                                                  Icons.location_on,
+                                                  color: _isDarkMode
+                                                      ? const Color(0xFFD0BCFF)
+                                                      : const Color(0xFF4A1E79),
+                                                  size: 16,
+                                                ),
+                                                const SizedBox(width: 4),
+                                                Expanded(
+                                                  child: Text(
+                                                    _organization?['name'] ??
+                                                        AppLanguage.tr(
+                                                          'office',
+                                                        ),
+                                                    style: TextStyle(
+                                                      fontSize: 14,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      color: _isDarkMode
+                                                          ? const Color(
+                                                              0xFFD0BCFF,
+                                                            )
+                                                          : Colors.black87,
+                                                    ),
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ],
                                         ),
@@ -1066,14 +1518,19 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                                 child: Container(
                                   decoration: BoxDecoration(
                                     gradient: const LinearGradient(
-                                      colors: [Color(0xFF8938DF), Color(0xFF4A1E79)],
+                                      colors: [
+                                        Color(0xFF8938DF),
+                                        Color(0xFF4A1E79),
+                                      ],
                                       begin: Alignment.topCenter,
                                       end: Alignment.bottomCenter,
                                     ),
                                     borderRadius: BorderRadius.circular(12),
                                     boxShadow: [
                                       BoxShadow(
-                                        color: const Color(0xFF4A1E79).withValues(alpha: 0.3),
+                                        color: const Color(
+                                          0xFF4A1E79,
+                                        ).withOpacity(0.3),
                                         blurRadius: 8,
                                         offset: const Offset(0, 4),
                                       ),
@@ -1082,14 +1539,18 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                                   child: Material(
                                     color: Colors.transparent,
                                     child: InkWell(
-                                      onTap: _handleCameraButtonPress,
+                                      onTap: _handleSelfAttendance,
                                       borderRadius: BorderRadius.circular(12),
-                                      child: const Padding(
-                                        padding: EdgeInsets.symmetric(vertical: 16),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 16,
+                                        ),
                                         child: Text(
-                                          'Chek In With Another Way',
+                                          AppLanguage.tr(
+                                            'Petugas.dashboard.selfie_gps',
+                                          ),
                                           textAlign: TextAlign.center,
-                                          style: TextStyle(
+                                          style: const TextStyle(
                                             color: Colors.white,
                                             fontSize: 16,
                                             fontWeight: FontWeight.bold,
@@ -1118,165 +1579,220 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                         padding: const EdgeInsets.symmetric(horizontal: 24),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                'Weekly Overview',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                  color: _isDarkMode ? Colors.white : Colors.black87,
-                                ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 6,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: (_isDarkMode ? const Color(0xFFD0BCFF) : const Color(0xFF4A1E79)).withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  'THIS WEEK',
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  AppLanguage.tr(
+                                    'Petugas.dashboard.weekly_overview',
+                                  ),
                                   style: TextStyle(
-                                    fontSize: 10,
+                                    fontSize: 18,
                                     fontWeight: FontWeight.bold,
-                                    color: _isDarkMode ? const Color(0xFFD0BCFF) : const Color(0xFF4A1E79),
+                                    color: _isDarkMode
+                                        ? Colors.white
+                                        : Colors.black87,
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          Container(
-                            padding: const EdgeInsets.all(20),
-                            decoration: BoxDecoration(
-                              color: _isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
-                              borderRadius: BorderRadius.circular(16),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.05),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 4),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color:
+                                        (_isDarkMode
+                                                ? const Color(0xFFD0BCFF)
+                                                : const Color(0xFF4A1E79))
+                                            .withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    AppLanguage.tr(
+                                      'Petugas.dashboard.this_week',
+                                    ),
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: _isDarkMode
+                                          ? const Color(0xFFD0BCFF)
+                                          : const Color(0xFF4A1E79),
+                                    ),
+                                  ),
                                 ),
                               ],
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    Text(
-                                      _isLoadingWeeklyData
-                                          ? '--'
-                                          : _totalWeeklyHours.toStringAsFixed(1),
-                                      style: TextStyle(
-                                        fontSize: 36,
-                                        fontWeight: FontWeight.bold,
-                                        color: _isDarkMode ? Colors.white : Colors.black87,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Padding(
-                                      padding: EdgeInsets.only(bottom: 8),
-                                      child: Text(
-                                        'hrs',
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          color: _isDarkMode
-                                              ? Colors.white54
-                                              : Colors.grey.shade600,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ),
-                                    const Spacer(),
-                                    Padding(
-                                      padding: const EdgeInsets.only(bottom: 6), // Slightly adjusted for optinal optical alignment
-                                      child: Row(
-                                        children: [
-                                          Container(
-                                            width: 12,
-                                            height: 12,
-                                            decoration: BoxDecoration(
-                                              color: _isDarkMode ? const Color(0xFFD0BCFF) : const Color(0xFF4A1E79),
-                                              shape: BoxShape.circle,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 6),
-                                          Text(
-                                            'HOURS',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.bold,
-                                              color: _isDarkMode
-                                                  ? Colors.white54
-                                                  : Colors.grey.shade600,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                if (!_isLoadingWeeklyData)
-                                  Row(
-                                    children: [
-                                      Icon(
-                                        _weeklyPercentageChange >= 0
-                                            ? Icons.trending_up
-                                            : Icons.trending_down,
-                                        color: _weeklyPercentageChange >= 0
-                                            ? (_isDarkMode ? Colors.greenAccent : Colors.green.shade600)
-                                            : (_isDarkMode ? Colors.redAccent : Colors.red.shade600),
-                                        size: 16,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        '${_weeklyPercentageChange >= 0 ? '+' : ''}${_weeklyPercentageChange.toStringAsFixed(1)}% from last week',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: _weeklyPercentageChange >= 0
-                                              ? (_isDarkMode ? Colors.greenAccent : Colors.green.shade600)
-                                              : (_isDarkMode ? Colors.redAccent : Colors.red.shade600),
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
+                            const SizedBox(height: 16),
+                            Container(
+                              padding: const EdgeInsets.all(20),
+                              decoration: BoxDecoration(
+                                color: _isDarkMode
+                                    ? const Color(0xFF2D1B4E)
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.05),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 4),
                                   ),
-                                const SizedBox(height: 24),
-                                // Bar Chart
-                                if (!_isLoadingWeeklyData)
+                                ],
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
                                   Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceAround,
                                     crossAxisAlignment: CrossAxisAlignment.end,
                                     children: [
-                                      _buildBarChart('MON', _dailyHours[0]),
-                                      _buildBarChart('TUE', _dailyHours[1]),
-                                      _buildBarChart('WED', _dailyHours[2]),
-                                      _buildBarChart('THU', _dailyHours[3]),
-                                      _buildBarChart('FRI', _dailyHours[4]),
+                                      Text(
+                                        _isLoadingWeeklyData
+                                            ? '--'
+                                            : _totalWeeklyHours.toStringAsFixed(
+                                                1,
+                                              ),
+                                        style: TextStyle(
+                                          fontSize: 36,
+                                          fontWeight: FontWeight.bold,
+                                          color: _isDarkMode
+                                              ? Colors.white
+                                              : Colors.black87,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Padding(
+                                        padding: EdgeInsets.only(bottom: 8),
+                                        child: Text(
+                                          AppLanguage.tr(
+                                            'Petugas.dashboard.total_hours',
+                                          ),
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            color: _isDarkMode
+                                                ? Colors.white54
+                                                : Colors.grey.shade600,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      Padding(
+                                        padding: const EdgeInsets.only(
+                                          bottom: 6,
+                                        ), // Slightly adjusted for optinal optical alignment
+                                        child: Row(
+                                          children: [
+                                            Container(
+                                              width: 12,
+                                              height: 12,
+                                              decoration: BoxDecoration(
+                                                color: _isDarkMode
+                                                    ? const Color(0xFFD0BCFF)
+                                                    : const Color(0xFF4A1E79),
+                                                shape: BoxShape.circle,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              AppLanguage.tr(
+                                                'Petugas.dashboard.hours',
+                                              ),
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold,
+                                                color: _isDarkMode
+                                                    ? Colors.white54
+                                                    : Colors.grey.shade600,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
                                     ],
-                                  )
-                                else
-                                  const Center(
-                                    child: Padding(
-                                      padding: EdgeInsets.all(20),
-                                      child: CircularProgressIndicator(),
-                                    ),
                                   ),
-                              ],
+                                  const SizedBox(height: 8),
+                                  if (!_isLoadingWeeklyData)
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          _weeklyPercentageChange >= 0
+                                              ? Icons.trending_up
+                                              : Icons.trending_down,
+                                          color: _weeklyPercentageChange >= 0
+                                              ? (_isDarkMode
+                                                    ? Colors.greenAccent
+                                                    : Colors.green.shade600)
+                                              : (_isDarkMode
+                                                    ? Colors.redAccent
+                                                    : Colors.red.shade600),
+                                          size: 16,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          '${_weeklyPercentageChange >= 0 ? '+' : ''}${_weeklyPercentageChange.toStringAsFixed(1)}% ${AppLanguage.tr('from_last_week')}',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: _weeklyPercentageChange >= 0
+                                                ? (_isDarkMode
+                                                      ? Colors.greenAccent
+                                                      : Colors.green.shade600)
+                                                : (_isDarkMode
+                                                      ? Colors.redAccent
+                                                      : Colors.red.shade600),
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  const SizedBox(height: 24),
+                                  // Bar Chart
+                                  if (!_isLoadingWeeklyData)
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceAround,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
+                                      children: [
+                                        _buildBarChart(
+                                          AppLanguage.tr('mon_short'),
+                                          _dailyHours[0],
+                                          0,
+                                        ),
+                                        _buildBarChart(
+                                          AppLanguage.tr('tue_short'),
+                                          _dailyHours[1],
+                                          1,
+                                        ),
+                                        _buildBarChart(
+                                          AppLanguage.tr('wed_short'),
+                                          _dailyHours[2],
+                                          2,
+                                        ),
+                                        _buildBarChart(
+                                          AppLanguage.tr('thu_short'),
+                                          _dailyHours[3],
+                                          3,
+                                        ),
+                                        _buildBarChart(
+                                          AppLanguage.tr('fri_short'),
+                                          _dailyHours[4],
+                                          4,
+                                        ),
+                                      ],
+                                    )
+                                  else
+                                    const Center(
+                                      child: Padding(
+                                        padding: EdgeInsets.all(20),
+                                        child: CircularProgressIndicator(),
+                                      ),
+                                    ),
+                                ],
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
                     ),
 
                     // RECENT ACTIVITY
@@ -1286,93 +1802,112 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                         padding: const EdgeInsets.symmetric(horizontal: 24),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                'Recent Activity',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                  color: _isDarkMode ? Colors.white : Colors.black87,
-                                ),
-                              ),
-                              TextButton(
-                                onPressed: () {
-                                  _handleNavigation(2);
-                                },
-                                child: Text(
-                                  'View All',
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  AppLanguage.tr(
+                                    'Petugas.dashboard.recent_activity',
+                                  ),
                                   style: TextStyle(
-                                    fontSize: 14,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
                                     color: _isDarkMode
-                                        ? const Color(0xFFD0BCFF)
-                                        : const Color(0xFF4A1E79),
-                                    fontWeight: FontWeight.w600,
+                                        ? Colors.white
+                                        : Colors.black87,
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          if (_isLoadingActivities)
-                            Container(
-                              padding: const EdgeInsets.all(32),
-                              decoration: BoxDecoration(
-                                color: _isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: Center(
-                                child: SizedBox(
-                                  width: 24,
-                                  height: 24,
+                                TextButton(
+                                  onPressed: () {
+                                    _handleNavigation(2);
+                                  },
+                                  child: Text(
+                                    AppLanguage.tr('view_all'),
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: _isDarkMode
+                                          ? const Color(0xFFD0BCFF)
+                                          : const Color(0xFF4A1E79),
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            if (_isLoadingActivities)
+                              Container(
+                                padding: const EdgeInsets.all(32),
+                                decoration: BoxDecoration(
+                                  color: _isDarkMode
+                                      ? const Color(0xFF2D1B4E)
+                                      : Colors.white,
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: Center(
+                                  child: SizedBox(
+                                    width: 24,
+                                    height: 24,
                                     child: CircularProgressIndicator(
                                       strokeWidth: 2,
                                       valueColor: AlwaysStoppedAnimation<Color>(
-                                          _isDarkMode ? const Color(0xFFD0BCFF) : const Color(0xFF4A1E79)),
-                                    ),
-                                ),
-                              ),
-                            )
-                          else if (_recentActivities.isEmpty)
-                            Container(
-                              padding: const EdgeInsets.all(32),
-                              decoration: BoxDecoration(
-                                color: _isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: Center(
-                                child: Column(
-                                  children: [
-                                    Icon(
-                                      Icons.history,
-                                      size: 48,
-                                      color: _isDarkMode ? Colors.white24 : Colors.grey.shade300,
-                                    ),
-                                    const SizedBox(height: 12),
-                                    Text(
-                                      'No recent activity',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: _isDarkMode ? Colors.white54 : Colors.grey.shade600,
+                                        _isDarkMode
+                                            ? const Color(0xFFD0BCFF)
+                                            : const Color(0xFF4A1E79),
                                       ),
                                     ),
-                                  ],
+                                  ),
                                 ),
+                              )
+                            else if (_recentActivities.isEmpty)
+                              Container(
+                                padding: const EdgeInsets.all(32),
+                                decoration: BoxDecoration(
+                                  color: _isDarkMode
+                                      ? const Color(0xFF2D1B4E)
+                                      : Colors.white,
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: Center(
+                                  child: Column(
+                                    children: [
+                                      Icon(
+                                        Icons.history,
+                                        size: 48,
+                                        color: _isDarkMode
+                                            ? Colors.white24
+                                            : Colors.grey.shade300,
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Text(
+                                        AppLanguage.tr(
+                                          'Petugas.dashboard.no_recent_activity',
+                                        ),
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: _isDarkMode
+                                              ? Colors.white54
+                                              : Colors.grey.shade600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              )
+                            else
+                              Column(
+                                children: _recentActivities
+                                    .take(3)
+                                    .map(
+                                      (activity) =>
+                                          _buildModernActivityItem(activity),
+                                    )
+                                    .toList(),
                               ),
-                            )
-                          else
-                            Column(
-                              children: _recentActivities
-                                  .take(3)
-                                  .map((activity) =>
-                                      _buildModernActivityItem(activity))
-                                  .toList(),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
                     ),
 
                     const SizedBox(height: 100),
@@ -1393,21 +1928,22 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
     );
   }
 
-  Widget _buildBarChart(String day, double hours) {
+  Widget _buildBarChart(String day, double hours, int dayIndex) {
     // Find max hours for normalization
-    final maxHours = _dailyHours.reduce((a, b) => a > b ? a : b);
-    
+    final maxHours = _dailyHours.isEmpty
+        ? 0.0
+        : _dailyHours.reduce((a, b) => a > b ? a : b);
+
     // Calculate height (normalize to 0-1 range, with minimum 20% for visibility)
     double normalizedHeight = 0.2; // Minimum height for empty days
     if (maxHours > 0 && hours > 0) {
       normalizedHeight = (hours / maxHours).clamp(0.2, 1.0);
     }
-    
+
     // Check if this is the current day
     final now = DateTime.now();
-    final dayIndex = ['MON', 'TUE', 'WED', 'THU', 'FRI'].indexOf(day);
     final isCurrentDay = now.weekday == dayIndex + 1;
-    
+
     return Column(
       children: [
         Container(
@@ -1416,12 +1952,18 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: isCurrentDay
-                  ? (_isDarkMode 
-                      ? [const Color(0xFFD0BCFF), const Color(0xFF8938DF)]
-                      : [const Color(0xFF8938DF), const Color(0xFF4A1E79)])
+                  ? (_isDarkMode
+                        ? [const Color(0xFFD0BCFF), const Color(0xFF8938DF)]
+                        : [const Color(0xFF8938DF), const Color(0xFF4A1E79)])
                   : [
-                      (_isDarkMode ? const Color(0xFFD0BCFF) : const Color(0xFF4A1E79)).withValues(alpha: _isDarkMode ? 0.25 : 0.15),
-                      (_isDarkMode ? const Color(0xFFD0BCFF) : const Color(0xFF4A1E79)).withValues(alpha: _isDarkMode ? 0.25 : 0.15),
+                      (_isDarkMode
+                              ? const Color(0xFFD0BCFF)
+                              : const Color(0xFF4A1E79))
+                          .withOpacity(_isDarkMode ? 0.25 : 0.15),
+                      (_isDarkMode
+                              ? const Color(0xFFD0BCFF)
+                              : const Color(0xFF4A1E79))
+                          .withOpacity(_isDarkMode ? 0.25 : 0.15),
                     ],
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
@@ -1436,7 +1978,9 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
             fontSize: 11,
             fontWeight: isCurrentDay ? FontWeight.bold : FontWeight.w500,
             color: isCurrentDay
-                ? (_isDarkMode ? const Color(0xFFD0BCFF) : const Color(0xFF4A1E79))
+                ? (_isDarkMode
+                      ? const Color(0xFFD0BCFF)
+                      : const Color(0xFF4A1E79))
                 : (_isDarkMode ? Colors.white54 : Colors.grey.shade600),
           ),
         ),
@@ -1445,7 +1989,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
   }
 
   Widget _buildModernActivityItem(Map<String, dynamic> activity) {
-    final name = activity['name'] as String? ?? 'Unknown User';
+    final name = activity['name'] as String? ?? AppLanguage.tr('unknown_user');
     final checkInTime = activity['checkInTime'] as DateTime?;
     final checkOutTime = activity['checkOutTime'] as DateTime?;
     final lastUpdated = activity['lastUpdated'] as DateTime?;
@@ -1458,7 +2002,9 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: _isDarkMode ? Colors.black26 : Colors.black.withValues(alpha: 0.05),
+            color: _isDarkMode
+                ? Colors.black26
+                : Colors.black.withOpacity(0.05),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -1472,9 +2018,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: _isDarkMode
-                        ? Colors.white
-                        : Colors.green.shade50,
+                    color: _isDarkMode ? Colors.white : Colors.green.shade50,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
@@ -1489,7 +2033,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Check In',
+                        AppLanguage.tr('Petugas.dashboard.check_in'),
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
@@ -1500,10 +2044,12 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                       Text(
                         lastUpdated != null
                             ? _formatEventTime(lastUpdated)
-                            : 'Unknown time',
+                            : AppLanguage.tr('unknown_time'),
                         style: TextStyle(
                           fontSize: 12,
-                          color: _isDarkMode ? Colors.white54 : Colors.grey.shade600,
+                          color: _isDarkMode
+                              ? Colors.white54
+                              : Colors.grey.shade600,
                         ),
                       ),
                     ],
@@ -1531,7 +2077,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        'ON TIME',
+                        AppLanguage.tr('Petugas.dashboard.on_time'),
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
@@ -1557,9 +2103,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: _isDarkMode
-                        ? Colors.white
-                        : Colors.red.shade50,
+                    color: _isDarkMode ? Colors.white : Colors.red.shade50,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
@@ -1574,7 +2118,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Check Out',
+                        AppLanguage.tr('Petugas.dashboard.check_out'),
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
@@ -1585,10 +2129,12 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                       Text(
                         lastUpdated != null
                             ? _formatEventTime(lastUpdated)
-                            : 'Unknown time',
+                            : AppLanguage.tr('unknown_time'),
                         style: TextStyle(
                           fontSize: 12,
-                          color: _isDarkMode ? Colors.white54 : Colors.grey.shade600,
+                          color: _isDarkMode
+                              ? Colors.white54
+                              : Colors.grey.shade600,
                         ),
                       ),
                     ],
@@ -1605,25 +2151,61 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                         color: _isDarkMode ? Colors.white : Colors.black87,
                       ),
                     ),
-                    Container(
-                      margin: const EdgeInsets.only(top: 4),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.shade100,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        'REGULAR',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue.shade700,
+                    const SizedBox(height: 4),
+                    // Shift Name Badge
+                    if (activity['shiftName'] != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        margin: const EdgeInsets.only(bottom: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.blue.shade200),
+                        ),
+                        child: Text(
+                          activity['shiftName']!.toString().toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.blue.shade700,
+                          ),
                         ),
                       ),
-                    ),
+                    // Method Badge (e.g. RFID, SELFIE)
+                    if (activity['checkOutMethod'] != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: Colors.grey.shade300),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _getMethodIcon(activity['checkOutMethod']),
+                              size: 10,
+                              color: Colors.grey.shade700,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              _formatMethodName(activity['checkOutMethod']),
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey.shade700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                   ],
                 ),
               ],
@@ -1683,7 +2265,11 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                           photoUrl,
                           fit: BoxFit.cover,
                           errorBuilder: (context, error, stackTrace) {
-                            return const Icon(Icons.person, size: 22, color: Colors.grey);
+                            return const Icon(
+                              Icons.person,
+                              size: 22,
+                              color: Colors.grey,
+                            );
                           },
                         )
                       : const Icon(Icons.person, size: 22, color: Colors.grey),
@@ -1731,7 +2317,10 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
             children: [
               Expanded(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.green.shade50,
                     borderRadius: BorderRadius.circular(8),
@@ -1764,7 +2353,10 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
               const SizedBox(width: 8),
               Expanded(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.blue.shade50,
                     borderRadius: BorderRadius.circular(8),
@@ -1830,11 +2422,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               if (methodIcon != null) ...[
-                Icon(
-                  methodIcon,
-                  size: 10,
-                  color: textColor,
-                ),
+                Icon(methodIcon, size: 10, color: textColor),
                 const SizedBox(width: 3),
               ],
               Flexible(
@@ -1845,7 +2433,6 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                     fontWeight: FontWeight.w600,
                     color: textColor,
                   ),
-                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -1863,103 +2450,24 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
       ),
     );
   }
-}
 
-// SUPPORTING WIDGETS - Diperkecil
-
-class _QuickActionCard extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-  final Color iconColor;
-  final VoidCallback onTap;
-
-  const _QuickActionCard({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.iconColor,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              children: [
-                Icon(icon, color: iconColor, size: 26),
-                const SizedBox(height: 6),
-                Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black87,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+  IconData _getMethodIcon(dynamic method) {
+    if (method == null) return Icons.help_outline;
+    final m = method.toString().toLowerCase();
+    if (m.contains('rfid')) return Icons.credit_card;
+    if (m.contains('face') || m.contains('wajah')) return Icons.face;
+    if (m.contains('selfie')) return Icons.camera_alt;
+    if (m.contains('manual')) return Icons.edit_note;
+    return Icons.check_circle_outline;
   }
-}
 
-class _StatCard extends StatelessWidget {
-  final String value;
-  final String label;
-  final Color color;
-  final IconData? icon;
-  final Color? iconColor;
-
-  const _StatCard({
-    required this.value,
-    required this.label,
-    required this.color,
-    this.icon,
-    this.iconColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        children: [
-          if (icon != null)
-            Icon(icon, color: iconColor ?? Colors.black54, size: 20),
-          if (icon != null) const SizedBox(height: 6),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            label,
-            style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
-          ),
-        ],
-      ),
-    );
+  String _formatMethodName(dynamic method) {
+    if (method == null) return '-';
+    final m = method.toString().toLowerCase();
+    if (m.contains('rfid')) return 'RFID';
+    if (m.contains('face') || m.contains('wajah')) return 'FACE';
+    if (m.contains('selfie')) return 'SELFIE';
+    if (m.contains('manual')) return 'MANUAL';
+    return method.toString().toUpperCase();
   }
 }

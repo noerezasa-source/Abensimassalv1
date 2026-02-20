@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SupabaseStorageService {
@@ -21,17 +22,25 @@ class SupabaseStorageService {
       
       // Path dengan user ID di depan untuk RLS policy
       final filePath = '${user.id}/$fileName';
+      const bucketName = 'photo-attendance';
+
+      debugPrint('Uploading to bucket: $bucketName, path: $filePath');
 
       await _supabase.storage
-          .from('photo-attendance')
+          .from(bucketName)
           .upload(filePath, imageFile);
 
       final publicUrl = _supabase.storage
-          .from('photo-attendance')
+          .from(bucketName)
           .getPublicUrl(filePath);
 
+      debugPrint('Upload successful: $publicUrl');
       return publicUrl;
     } catch (e) {
+      debugPrint('SupabaseStorageService Error: $e');
+      if (e.toString().contains('Bucket not found')) {
+        debugPrint('⚠️ CRITICAL: Bucket "photo-attendance" not found. Please verify bucket ID in Supabase Storage.');
+      }
       throw Exception('Failed to upload attendance photo: $e');
     }
   }

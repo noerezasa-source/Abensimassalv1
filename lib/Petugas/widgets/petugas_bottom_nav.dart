@@ -1,10 +1,11 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import '../../helpers/language_helper.dart';
 
 class PetugasBottomNav extends StatelessWidget {
   final int currentIndex;
   final Function(int) onNavigationTap;
-  final VoidCallback? onAttendanceTap; // Opsional - null jika tidak ada tombol attendance
+  final VoidCallback?
+  onAttendanceTap; // Opsional - null jika tidak ada tombol attendance
 
   const PetugasBottomNav({
     super.key,
@@ -68,13 +69,13 @@ class PetugasBottomNav extends StatelessWidget {
                 _buildNavItem(
                   context,
                   Icons.home_rounded,
-                  'Home',
+                  AppLanguage.tr('home'),
                   0,
                 ),
                 _buildNavItem(
                   context,
                   Icons.people_rounded,
-                  'Member',
+                  AppLanguage.tr('members'),
                   1,
                 ),
                 // Spacer untuk tombol attendance di tengah (hanya jika ada)
@@ -82,13 +83,13 @@ class PetugasBottomNav extends StatelessWidget {
                 _buildNavItem(
                   context,
                   Icons.list_alt_rounded,
-                  'Report',
+                  AppLanguage.tr('report'),
                   2,
                 ),
                 _buildNavItem(
                   context,
                   Icons.person_rounded,
-                  'Profile',
+                  AppLanguage.tr('profile'),
                   3,
                 ),
               ],
@@ -108,16 +109,23 @@ class PetugasBottomNav extends StatelessWidget {
                     width: 70,
                     height: 70,
                     decoration: BoxDecoration(
-                      color: isDarkMode ? const Color(0xFF9E77F1) : const Color(0xFF4A1E79),
+                      color: isDarkMode
+                          ? const Color(0xFF9E77F1)
+                          : const Color(0xFF4A1E79),
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: isDarkMode ? const Color(0xFF1F0B38) : Colors.white,
+                        color: isDarkMode
+                            ? const Color(0xFF1F0B38)
+                            : Colors.white,
                         width: 5,
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: (isDarkMode ? const Color(0xFF9E77F1) : const Color(0xFF4A1E79))
-                              .withValues(alpha: isDarkMode ? 0.3 : 0.4),
+                          color:
+                              (isDarkMode
+                                      ? const Color(0xFF9E77F1)
+                                      : const Color(0xFF4A1E79))
+                                  .withValues(alpha: isDarkMode ? 0.3 : 0.4),
                           blurRadius: 15,
                           offset: const Offset(0, 4),
                         ),
@@ -144,7 +152,9 @@ class PetugasBottomNav extends StatelessWidget {
     int index,
   ) {
     final isSelected = currentIndex == index;
-    final accentColor = isDarkMode ? const Color(0xFFD0BCFF) : const Color(0xFF4A1E79);
+    final accentColor = isDarkMode
+        ? const Color(0xFFD0BCFF)
+        : const Color(0xFF4A1E79);
 
     return Expanded(
       child: Material(
@@ -169,7 +179,7 @@ class PetugasBottomNav extends StatelessWidget {
                           BoxShadow(
                             color: accentColor.withValues(alpha: 0.3),
                             blurRadius: 3,
-                          )
+                          ),
                         ]
                       : null,
                 ),

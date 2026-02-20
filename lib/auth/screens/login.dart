@@ -1,17 +1,16 @@
 import 'dart:io';
-import 'package:absensimassal/Petugas/screens/petugas_dashboard.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:absensimassal/auth/screens/join_organization_screen.dart';
+import 'package:absensimassal/Petugas/screens/petugas_dashboard.dart';
+import 'package:absensimassal/User/screens/user_dashboard.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'signup.dart';
-import 'join_organization_screen.dart';
-import '../services/role_service.dart';
-import '../../Petugas/screens/petugas_dashboard.dart';
-import '../../User/screens/user_dashboard.dart';
 import '../../helpers/language_helper.dart';
+import '../services/role_service.dart';
 
 class ModernLoginScreen extends StatefulWidget {
   const ModernLoginScreen({super.key});
@@ -41,11 +40,11 @@ class _ModernLoginScreenState extends State<ModernLoginScreen> {
   Future<bool> _checkInternetConnection() async {
     try {
       final connectivityResult = await Connectivity().checkConnectivity();
-      
+
       if (connectivityResult == ConnectivityResult.none) {
         return false;
       }
-      
+
       // Double check dengan ping ke Google DNS
       final result = await InternetAddress.lookup('google.com');
       if (result.isNotEmpty && result[0].rawAddress.isNotEmpty) {
@@ -164,19 +163,56 @@ class _ModernLoginScreenState extends State<ModernLoginScreen> {
     }
   }
 
-  Future<bool> _userHasOrganization(String userId) async {
+  Future<List<Map<String, dynamic>>> _getUserOrganizations(
+    String userId,
+  ) async {
     try {
-      final response = await supabase
-          .from('organization_members')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('is_active', true)
-          .maybeSingle();
-
-      return response != null;
+      return await _roleService.getAllOrganizationMembersWithRoles(userId);
     } catch (e) {
-      debugPrint('Error checking user organization: $e');
-      return false;
+      debugPrint('Error checking user organizations: $e');
+      return [];
+    }
+  }
+
+  // Extracted dashboard navigation logic
+  Future<void> _navigateToDashboard(Map<String, dynamic> memberData) async {
+    if (!mounted) return;
+
+    final organizationMemberId = memberData['id'] as int;
+
+    if (_roleService.isPetugas(memberData)) {
+      debugPrint('✓ User is Admin - navigating to Petugas Dashboard');
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(
+          builder: (context) => PetugasDashboardPage(
+            organizationMemberId: organizationMemberId,
+            memberData: memberData,
+          ),
+        ),
+        (route) => false,
+      );
+    } else if (_roleService.isUser(memberData)) {
+      debugPrint('✓ User is Regular User - navigating to User Dashboard');
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(
+          builder: (context) => UserDashboardPage(
+            organizationMemberId: organizationMemberId,
+            memberData: memberData,
+          ),
+        ),
+        (route) => false,
+      );
+    } else {
+      debugPrint('⚠️ Unknown role - navigating to User Dashboard');
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(
+          builder: (context) => UserDashboardPage(
+            organizationMemberId: organizationMemberId,
+            memberData: memberData,
+          ),
+        ),
+        (route) => false,
+      );
     }
   }
 
@@ -194,63 +230,25 @@ class _ModernLoginScreenState extends State<ModernLoginScreen> {
     );
 
     try {
-      final hasOrganization = await _userHasOrganization(userId);
+      final memberships = await _getUserOrganizations(userId);
 
       if (!mounted) return;
       Navigator.of(context).pop(); // Close loading dialog
 
       if (!mounted) return;
 
-      if (hasOrganization) {
-        debugPrint('✓ User has organization - checking role');
+      if (memberships.isNotEmpty) {
+        debugPrint('✓ User has ${memberships.length} organizations');
         _showSnackBar(AppLanguage.tr('login_success'), true);
 
-        final memberData = await _roleService.getOrganizationMemberWithRole(userId);
-
-        if (memberData == null) {
-          throw Exception('Failed to fetch member data');
-        }
-
-        final organizationMemberId = memberData['id'] as int;
-
-        if (!mounted) return;
-
-        if (_roleService.isPetugas(memberData)) {
-          debugPrint('✓ User is Admin - navigating to Petugas Dashboard');
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(
-              builder: (context) => PetugasDashboardPage(
-                organizationMemberId: organizationMemberId,
-                memberData: memberData,
-              ),
-            ),
-            (route) => false,
-          );
-        } else if (_roleService.isUser(memberData)) {
-          debugPrint('✓ User is Regular User - navigating to User Dashboard');
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(
-              builder: (context) => UserDashboardPage(
-                organizationMemberId: organizationMemberId,
-                memberData: memberData,
-              ),
-            ),
-            (route) => false,
-          );
-        } else {
-          debugPrint('⚠️ Unknown role - navigating to User Dashboard');
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(
-              builder: (context) => UserDashboardPage(
-                organizationMemberId: organizationMemberId,
-                memberData: memberData,
-              ),
-            ),
-            (route) => false,
-          );
-        }
+        // Always pick the first membership and navigate to dashboard
+        // SKIP: OrganizationSelectionPage
+        final memberData = memberships.first;
+        _navigateToDashboard(memberData);
       } else {
-        debugPrint('⚠️ User has no organization - navigating to Join Organization');
+        debugPrint(
+          '⚠️ User has no organization - navigating to Join Organization',
+        );
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
             builder: (context) => const JoinOrganizationScreen(),
@@ -329,7 +327,8 @@ class _ModernLoginScreenState extends State<ModernLoginScreen> {
       if (e.toString().toLowerCase().contains('socketexception') ||
           e.toString().toLowerCase().contains('failed host lookup') ||
           e.toString().toLowerCase().contains('network')) {
-        errorMessage = 'Tidak ada koneksi internet. Mohon periksa koneksi Anda.';
+        errorMessage =
+            'Tidak ada koneksi internet. Mohon periksa koneksi Anda.';
       } else if (e is AuthException) {
         if (e.message.toLowerCase().contains('invalid login credentials') ||
             e.message.toLowerCase().contains('invalid_credentials')) {
@@ -451,14 +450,16 @@ class _ModernLoginScreenState extends State<ModernLoginScreen> {
     } catch (e) {
       debugPrint('❌ Error during Google Sign In: $e');
       if (!mounted) return;
-      
-      String errorMessage = '${AppLanguage.tr('google_signin_failed')}: ${e.toString()}';
-      
+
+      String errorMessage =
+          '${AppLanguage.tr('google_signin_failed')}: ${e.toString()}';
+
       if (e.toString().toLowerCase().contains('socketexception') ||
           e.toString().toLowerCase().contains('failed host lookup')) {
-        errorMessage = 'Tidak ada koneksi internet. Mohon periksa koneksi Anda.';
+        errorMessage =
+            'Tidak ada koneksi internet. Mohon periksa koneksi Anda.';
       }
-      
+
       _showSnackBar(errorMessage, false);
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -514,7 +515,7 @@ class _ModernLoginScreenState extends State<ModernLoginScreen> {
                           ),
                         ),
                         const SizedBox(height: 24),
-                        
+
                         // Email Field
                         _buildInputLabel(AppLanguage.tr('email_address')),
                         const SizedBox(height: 6),
@@ -526,15 +527,17 @@ class _ModernLoginScreenState extends State<ModernLoginScreen> {
                             if (value == null || value.trim().isEmpty) {
                               return AppLanguage.tr('email_required');
                             }
-                            if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
+                            if (!RegExp(
+                              r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
+                            ).hasMatch(value)) {
                               return AppLanguage.tr('email_invalid');
                             }
                             return null;
                           },
                         ),
-                        
+
                         const SizedBox(height: 16),
-                        
+
                         // Password Field
                         _buildInputLabel(AppLanguage.tr('password')),
                         const SizedBox(height: 6),
@@ -544,11 +547,15 @@ class _ModernLoginScreenState extends State<ModernLoginScreen> {
                           obscureText: _obscurePassword,
                           suffixIcon: IconButton(
                             icon: Icon(
-                              _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                              _obscurePassword
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined,
                               color: Colors.grey.shade400,
                               size: 20,
                             ),
-                            onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                            onPressed: () => setState(
+                              () => _obscurePassword = !_obscurePassword,
+                            ),
                           ),
                           validator: (value) {
                             if (value == null || value.isEmpty) {
@@ -557,7 +564,7 @@ class _ModernLoginScreenState extends State<ModernLoginScreen> {
                             return null;
                           },
                         ),
-                        
+
                         Align(
                           alignment: Alignment.centerRight,
                           child: TextButton(
@@ -579,9 +586,9 @@ class _ModernLoginScreenState extends State<ModernLoginScreen> {
                             ),
                           ),
                         ),
-                        
+
                         const SizedBox(height: 16),
-                        
+
                         // Sign In Button
                         SizedBox(
                           width: double.infinity,
@@ -591,7 +598,9 @@ class _ModernLoginScreenState extends State<ModernLoginScreen> {
                               borderRadius: BorderRadius.circular(16),
                               boxShadow: [
                                 BoxShadow(
-                                  color: const Color(0xFF673AB7).withOpacity(0.2),
+                                  color: const Color(
+                                    0xFF673AB7,
+                                  ).withOpacity(0.2),
                                   blurRadius: 15,
                                   offset: const Offset(0, 8),
                                 ),
@@ -613,7 +622,10 @@ class _ModernLoginScreenState extends State<ModernLoginScreen> {
                                       height: 24,
                                       child: CircularProgressIndicator(
                                         strokeWidth: 2.5,
-                                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                              Colors.white,
+                                            ),
                                       ),
                                     )
                                   : Text(
@@ -626,25 +638,34 @@ class _ModernLoginScreenState extends State<ModernLoginScreen> {
                             ),
                           ),
                         ),
-                        
+
                         const SizedBox(height: 24),
-                        
+
                         Row(
                           children: [
-                            Expanded(child: Divider(color: Colors.grey.shade300)),
+                            Expanded(
+                              child: Divider(color: Colors.grey.shade300),
+                            ),
                             Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                              ),
                               child: Text(
                                 AppLanguage.tr('or'),
-                                style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
+                                style: TextStyle(
+                                  color: Colors.grey.shade500,
+                                  fontSize: 13,
+                                ),
                               ),
                             ),
-                            Expanded(child: Divider(color: Colors.grey.shade300)),
+                            Expanded(
+                              child: Divider(color: Colors.grey.shade300),
+                            ),
                           ],
                         ),
-                        
+
                         const SizedBox(height: 24),
-                        
+
                         // Google Sign In Button
                         SizedBox(
                           width: double.infinity,
@@ -679,9 +700,9 @@ class _ModernLoginScreenState extends State<ModernLoginScreen> {
                             ),
                           ),
                         ),
-                        
+
                         const SizedBox(height: 8),
-                        
+
                         Padding(
                           padding: EdgeInsets.zero,
                           child: Row(
@@ -698,7 +719,10 @@ class _ModernLoginScreenState extends State<ModernLoginScreen> {
                                 onTap: () {
                                   Navigator.push(
                                     context,
-                                    MaterialPageRoute(builder: (context) => const ModernSignupScreen()),
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const ModernSignupScreen(),
+                                    ),
                                   );
                                 },
                                 child: const Text(
@@ -756,7 +780,10 @@ class _ModernLoginScreenState extends State<ModernLoginScreen> {
         hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 15),
         filled: true,
         fillColor: const Color(0xFFF1F4F9),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 20,
+          vertical: 18,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide.none,

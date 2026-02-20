@@ -7,52 +7,62 @@ class MemberPerformanceService {
   final SupabaseClient _supabase = Supabase.instance.client;
 
   /// Test database connection and basic data
-  Future<Map<String, dynamic>> testDatabaseConnection(int organizationId) async {
+  Future<Map<String, dynamic>> testDatabaseConnection(
+    int organizationId,
+  ) async {
     try {
       debugPrint('=== TESTING DATABASE CONNECTION ===');
       debugPrint('Organization ID: $organizationId');
-      
+
       // Test 1: Check if organization exists
       final orgResponse = await _supabase
           .from('organizations')
           .select('id, name')
           .eq('id', organizationId)
           .maybeSingle();
-      
+
       debugPrint('Organization check: $orgResponse');
-      
+
       // Test 2: Count organization members
       final memberCountResponse = await _supabase
           .from('organization_members')
           .select('id')
           .eq('organization_id', organizationId)
           .eq('is_active', true);
-      
+
       final memberCount = memberCountResponse?.length ?? 0;
       debugPrint('Active members count: $memberCount');
-      
+
       // Test 3: Count attendance records for current month
       final now = DateTime.now().toUtc();
-      final startDateStr = DateTime(now.year, now.month, 1).toIso8601String().split('T')[0];
-      final endDateStr = DateTime(now.year, now.month + 1, 0).toIso8601String().split('T')[0];
-      
+      final startDateStr = DateTime(
+        now.year,
+        now.month,
+        1,
+      ).toIso8601String().split('T')[0];
+      final endDateStr = DateTime(
+        now.year,
+        now.month + 1,
+        0,
+      ).toIso8601String().split('T')[0];
+
       final attendanceResponse = await _supabase
           .from('attendance_records')
           .select('id, organization_member_id, attendance_date, status')
           .gte('attendance_date', startDateStr)
           .lte('attendance_date', endDateStr);
-      
+
       final attendanceCount = attendanceResponse?.length ?? 0;
       debugPrint('Attendance records this month: $attendanceCount');
-      
+
       // Test 4: Check user_profiles
       final userProfileResponse = await _supabase
           .from('user_profiles')
           .select('id, display_name')
           .limit(5);
-      
+
       debugPrint('User profiles count: ${userProfileResponse?.length ?? 0}');
-      
+
       return {
         'organization_exists': orgResponse != null,
         'organization_data': orgResponse,
@@ -83,12 +93,13 @@ class MemberPerformanceService {
     try {
       debugPrint('=== GETTING ORGANIZATION MEMBERS (PAGINATED) ===');
       debugPrint('Org ID: $organizationId | Page: $page | Limit: $limit');
-      
+
       final fromIndex = (page - 1) * limit;
       final toIndex = fromIndex + limit - 1;
 
       // Base query
-      String selectStr = '''
+      String selectStr =
+          '''
             id,
             user_id,
             role_id,
@@ -126,44 +137,44 @@ class MemberPerformanceService {
           .from('organization_members')
           .select(selectStr)
           .eq('organization_id', organizationId);
-          
+
       // Filter active only if not requesting all
       if (!includeInactive) {
         query = query.eq('is_active', true);
       }
 
       // Apply filters if provided
-    if (searchQuery != null && searchQuery.isNotEmpty) {
-      query = query.ilike('user_profiles.display_name', '%$searchQuery%');
-    }
+      if (searchQuery != null && searchQuery.isNotEmpty) {
+        query = query.ilike('user_profiles.display_name', '%$searchQuery%');
+      }
 
-    if (departmentFilter != null && departmentFilter != 'All') {
-      query = query.eq('departments.name', departmentFilter);
-    }
-    
-    // Execute query with range
+      if (departmentFilter != null && departmentFilter != 'All') {
+        query = query.eq('departments.name', departmentFilter);
+      }
+
+      // Execute query with range
       final response = await query
           .order('employee_id', ascending: true)
           .range(fromIndex, toIndex);
 
       debugPrint('Members fetched: ${response.length}');
-      
+
       final members = List<Map<String, dynamic>>.from(response);
-      
+
       // Add member names and process roles for easier access
       for (final member in members) {
         member['member_name'] = _getMemberName(member);
-        
+
         // Extract role name for UI
         final role = member['system_roles'] as Map<String, dynamic>?;
         member['role_name'] = role?['name'] ?? 'Member';
         member['role_code'] = role?['code'] ?? 'US001';
       }
-      
+
       // In-memory filter for search/department if backend filtering is complex
       // (For proper pagination with filters, we should really filter on DB side)
       // This is a basic implementation of pagination.
-      
+
       return members;
     } catch (e) {
       debugPrint('!!! ERROR in getOrganizationMembers: $e');
@@ -184,7 +195,8 @@ class MemberPerformanceService {
         selectStr += ', user_profiles!inner(id)';
       }
       if (departmentFilter != null && departmentFilter != 'All') {
-        selectStr += ', departments!organization_members_department_id_fkey!inner(id)';
+        selectStr +=
+            ', departments!organization_members_department_id_fkey!inner(id)';
       }
 
       var query = _supabase
@@ -224,7 +236,7 @@ class MemberPerformanceService {
       final now = DateTime.now().toUtc();
       final start = startDate ?? DateTime(now.year, now.month, 1);
       final end = endDate ?? DateTime(now.year, now.month + 1, 0);
-      
+
       final startDateStr = start.toIso8601String().split('T')[0];
       final endDateStr = end.toIso8601String().split('T')[0];
 
@@ -247,7 +259,7 @@ class MemberPerformanceService {
 
       // Filter by organization through organization_members relationship
       query = query.eq('organization_members.organization_id', organizationId);
-      
+
       // Filter by specific member if provided
       if (memberId != null) {
         query = query.eq('organization_member_id', memberId);
@@ -287,32 +299,44 @@ class MemberPerformanceService {
   }) async {
     try {
       debugPrint('=== GETTING MEMBERS PERFORMANCE DATA (FAST REAL) ===');
-      
+
       // Get real members (including inactive ones)
-      final members = await getOrganizationMembers(organizationId, limit: limit, includeInactive: true);
+      final members = await getOrganizationMembers(
+        organizationId,
+        limit: limit,
+        includeInactive: true,
+      );
       debugPrint('Members for performance: ${members.length}');
-      
+
       if (members.isEmpty) {
         debugPrint('No members found, returning empty performance data');
         return [];
       }
-      
+
       // Get attendance records for the date range
-      final start = startDate?.toIso8601String().split('T')[0] ?? DateTime.now().toUtc().toIso8601String().split('T')[0];
-      final end = endDate?.toIso8601String().split('T')[0] ?? DateTime.now().toUtc().toIso8601String().split('T')[0];
-      
+      final start =
+          startDate?.toIso8601String().split('T')[0] ??
+          DateTime.now().toUtc().toIso8601String().split('T')[0];
+      final end =
+          endDate?.toIso8601String().split('T')[0] ??
+          DateTime.now().toUtc().toIso8601String().split('T')[0];
+
       debugPrint('Fetching attendance from $start to $end');
 
       final memberIds = members.map((m) => m['id'] as int).toList();
-      
+
       final attendanceRecords = await _supabase
           .from('attendance_records')
-          .select('organization_member_id, status, actual_check_in, actual_check_out, work_duration_minutes, late_minutes, overtime_minutes')
+          .select(
+            'organization_member_id, status, actual_check_in, actual_check_out, work_duration_minutes, late_minutes, overtime_minutes',
+          )
           .filter('organization_member_id', 'in', memberIds)
           .gte('attendance_date', start)
           .lte('attendance_date', end);
 
-      debugPrint('Total attendance records found: ${attendanceRecords?.length ?? 0}');
+      debugPrint(
+        'Total attendance records found: ${attendanceRecords?.length ?? 0}',
+      );
 
       // Group records by member
       final memberRecordsCheck = <int, List<Map<String, dynamic>>>{};
@@ -328,54 +352,70 @@ class MemberPerformanceService {
 
       // Create performance data
       final performers = <Map<String, dynamic>>[];
-      
+
       for (final member in members) {
         final memberId = member['id'] as int;
         final records = memberRecordsCheck[memberId] ?? [];
-        
+
         // Calculate aggregated metrics
         int presentDays = 0;
         int totalWorkMinutes = 0;
         int totalLogs = 0; // Total check-ins + check-outs
-        
+
         for (final record in records) {
           final status = record['status'] as String?;
           if (status == 'present' || status == 'late') {
             presentDays++;
           }
-          
+
           totalWorkMinutes += (record['work_duration_minutes'] as int? ?? 0);
-          
+
           // Count logs (check-in + check-out)
           if (record['actual_check_in'] != null) totalLogs++;
           if (record['actual_check_out'] != null) totalLogs++;
         }
-        
+
         // Calculate simplified productivity score for sorting
-        final attendanceRate = records.isNotEmpty ? presentDays / records.length : 0.0;
-        int lateDays = records.where((r) => (r['late_minutes'] as int? ?? 0) > 0).length;
-        final punctualityRate = records.isNotEmpty ? (records.length - lateDays) / records.length : 0.0;
-        
+        final attendanceRate = records.isNotEmpty
+            ? presentDays / records.length
+            : 0.0;
+        int lateDays = records
+            .where((r) => (r['late_minutes'] as int? ?? 0) > 0)
+            .length;
+        final punctualityRate = records.isNotEmpty
+            ? (records.length - lateDays) / records.length
+            : 0.0;
+
         // Final score: 50% Attendance, 30% Punctuality, 20% Activity (Bonus)
-        final productivityScore = attendanceRate * 0.5 + punctualityRate * 0.3 + (totalWorkMinutes > 0 ? 0.2 : 0.0);
+        final productivityScore =
+            attendanceRate * 0.5 +
+            punctualityRate * 0.3 +
+            (totalWorkMinutes > 0 ? 0.2 : 0.0);
 
         performers.add({
           ...member,
           'performance_stats': {
             'total_days': records.length, // records found in period
-            'present_days': totalLogs, // Using totalLogs as the "Total Attendance" metric requested
+            'present_days':
+                totalLogs, // Using totalLogs as the "Total Attendance" metric requested
             'total_work_minutes': totalWorkMinutes,
             'attendance_rate': attendanceRate,
             'punctuality_rate': punctualityRate,
             'productivity_score': productivityScore,
-          }
+          },
         });
       }
 
       // Sort by productivity score
       performers.sort((a, b) {
-        final aScore = (a['performance_stats'] as Map<String, dynamic>)['productivity_score'] as double;
-        final bScore = (b['performance_stats'] as Map<String, dynamic>)['productivity_score'] as double;
+        final aScore =
+            (a['performance_stats']
+                    as Map<String, dynamic>)['productivity_score']
+                as double;
+        final bScore =
+            (b['performance_stats']
+                    as Map<String, dynamic>)['productivity_score']
+                as double;
         return bScore.compareTo(aScore);
       });
 
@@ -395,15 +435,25 @@ class MemberPerformanceService {
     String organizationTimezone = 'Asia/Jakarta',
   }) async {
     try {
-      debugPrint('=== GETTING ORGANIZATION PERFORMANCE SUMMARY (FAST REAL) ===');
-      debugPrint('Organization ID: $organizationId | Timezone: $organizationTimezone');
-      
+      debugPrint(
+        '=== GETTING ORGANIZATION PERFORMANCE SUMMARY (FAST REAL) ===',
+      );
+      debugPrint(
+        'Organization ID: $organizationId | Timezone: $organizationTimezone',
+      );
+
       // Get real member count
-      final allMembersCount = await getOrganizationMembersCount(organizationId, includeInactive: true);
-      final activeMembersCount = await getOrganizationMembersCount(organizationId, includeInactive: false);
-      
+      final allMembersCount = await getOrganizationMembersCount(
+        organizationId,
+        includeInactive: true,
+      );
+      final activeMembersCount = await getOrganizationMembersCount(
+        organizationId,
+        includeInactive: false,
+      );
+
       final members = await getOrganizationMembers(organizationId);
-      
+
       if (members.isEmpty && allMembersCount == 0) {
         debugPrint('No members found, returning empty summary');
         return {
@@ -420,27 +470,35 @@ class MemberPerformanceService {
 
       // Get today's attendance for real stats - querying ALL members in organization via join
       // Use organization's local "today" instead of UTC today
-      final today = TimezoneHelper.getCurrentDateInOrgTimezone(organizationTimezone);
-      
+      final today = TimezoneHelper.getCurrentDateInOrgTimezone(
+        organizationTimezone,
+      );
+
       final todayAttendance = await _supabase
           .from('attendance_records')
-          .select('organization_member_id, status, organization_members!inner(organization_id)')
+          .select(
+            'organization_member_id, status, organization_members!inner(organization_id)',
+          )
           .eq('organization_members.organization_id', organizationId)
           .eq('attendance_date', today);
 
-      debugPrint('Today global organization attendance records: ${todayAttendance?.length ?? 0}');
+      debugPrint(
+        'Today global organization attendance records: ${todayAttendance?.length ?? 0}',
+      );
 
       // Calculate real stats from today's data
       final totalMembers = allMembersCount;
       final activeMembers = activeMembersCount;
-      
+
       double attendanceRate = 0.0;
       double punctualityRate = 0.0;
-      
+
       if (todayAttendance != null && todayAttendance.isNotEmpty) {
-        final presentCount = todayAttendance.where((r) => r['status'] == 'present').length;
+        final presentCount = todayAttendance
+            .where((r) => r['status'] == 'present')
+            .length;
         attendanceRate = activeMembers > 0 ? presentCount / activeMembers : 0.0;
-        
+
         // Simple punctuality calculation (assuming most are punctual for demo)
         punctualityRate = 0.85;
       }
@@ -506,28 +564,40 @@ class MemberPerformanceService {
 
         final stats = departmentStats[deptName]!;
         stats['member_count'] = (stats['member_count'] as int) + 1;
-        stats['total_attendance_rate'] = (stats['total_attendance_rate'] as double) + (performance['attendance_rate'] as double);
-        stats['total_punctuality_rate'] = (stats['total_punctuality_rate'] as double) + (performance['punctuality_rate'] as double);
-        stats['total_productivity_score'] = (stats['total_productivity_score'] as double) + (performance['productivity_score'] as double);
-        stats['total_work_hours'] = (stats['total_work_hours'] as double) + (performance['avg_work_hours'] as double);
+        stats['total_attendance_rate'] =
+            (stats['total_attendance_rate'] as double) +
+            (performance['attendance_rate'] as double);
+        stats['total_punctuality_rate'] =
+            (stats['total_punctuality_rate'] as double) +
+            (performance['punctuality_rate'] as double);
+        stats['total_productivity_score'] =
+            (stats['total_productivity_score'] as double) +
+            (performance['productivity_score'] as double);
+        stats['total_work_hours'] =
+            (stats['total_work_hours'] as double) +
+            (performance['avg_work_hours'] as double);
       }
 
       // Calculate averages for each department
       final deptComparison = <Map<String, dynamic>>[];
-      
+
       for (final entry in departmentStats.entries) {
         final deptName = entry.key;
         final stats = entry.value;
         final memberCount = stats['member_count'] as int;
-        
+
         if (memberCount > 0) {
           deptComparison.add({
             'department': deptName,
             'member_count': memberCount,
-            'avg_attendance_rate': (stats['total_attendance_rate'] as double) / memberCount,
-            'avg_punctuality_rate': (stats['total_punctuality_rate'] as double) / memberCount,
-            'avg_productivity_score': (stats['total_productivity_score'] as double) / memberCount,
-            'avg_work_hours': (stats['total_work_hours'] as double) / memberCount,
+            'avg_attendance_rate':
+                (stats['total_attendance_rate'] as double) / memberCount,
+            'avg_punctuality_rate':
+                (stats['total_punctuality_rate'] as double) / memberCount,
+            'avg_productivity_score':
+                (stats['total_productivity_score'] as double) / memberCount,
+            'avg_work_hours':
+                (stats['total_work_hours'] as double) / memberCount,
           });
         }
       }
@@ -541,7 +611,9 @@ class MemberPerformanceService {
 
       return {
         'departments': deptComparison,
-        'best_department': deptComparison.isNotEmpty ? deptComparison.first : null,
+        'best_department': deptComparison.isNotEmpty
+            ? deptComparison.first
+            : null,
         'needs_attention_departments': deptComparison
             .where((d) => d['avg_productivity_score'] < 0.7)
             .toList(),
@@ -563,12 +635,12 @@ class MemberPerformanceService {
 
     for (final record in attendanceRecords) {
       totalDays++;
-      
+
       final status = record['status'] as String?;
       final lateMinutes = record['late_minutes'] as int? ?? 0;
       final workMinutes = record['work_duration_minutes'] as int? ?? 0;
       final overtimeMinutes = record['overtime_minutes'] as int? ?? 0;
-      
+
       switch (status) {
         case 'present':
           presentDays++;
@@ -577,24 +649,27 @@ class MemberPerformanceService {
           absentDays++;
           break;
       }
-      
+
       if (lateMinutes > 0) {
         lateDays++;
       }
-      
+
       totalWorkMinutes += workMinutes;
       totalLateMinutes += lateMinutes;
       totalOvertimeMinutes += overtimeMinutes;
     }
 
     final attendanceRate = totalDays > 0 ? presentDays / totalDays : 0.0;
-    final punctualityRate = totalDays > 0 ? (totalDays - lateDays) / totalDays : 0.0;
-    
+    final punctualityRate = totalDays > 0
+        ? (totalDays - lateDays) / totalDays
+        : 0.0;
+
     // Productivity score: combination of attendance, punctuality, and work duration
     final avgWorkMinutes = totalDays > 0 ? totalWorkMinutes / totalDays : 0.0;
-    final productivityScore = attendanceRate * 0.4 +
-                            punctualityRate * 0.3 +
-                            (avgWorkMinutes / 480).clamp(0.0, 1.0) * 0.3; // 480 minutes = 8 hours
+    final productivityScore =
+        attendanceRate * 0.4 +
+        punctualityRate * 0.3 +
+        (avgWorkMinutes / 480).clamp(0.0, 1.0) * 0.3; // 480 minutes = 8 hours
 
     return {
       'total_days': totalDays,
@@ -608,7 +683,9 @@ class MemberPerformanceService {
       'punctuality_rate': punctualityRate,
       'productivity_score': productivityScore,
       'avg_work_hours': avgWorkMinutes / 60,
-      'avg_overtime_hours': totalDays > 0 ? (totalOvertimeMinutes / totalDays) / 60 : 0.0,
+      'avg_overtime_hours': totalDays > 0
+          ? (totalOvertimeMinutes / totalDays) / 60
+          : 0.0,
     };
   }
 
@@ -620,12 +697,16 @@ class MemberPerformanceService {
   }) async {
     try {
       debugPrint('=== GETTING RECENT TODAY ACTIVITIES ===');
-      debugPrint('Organization ID: $organizationId | Timezone: $organizationTimezone');
-      
+      debugPrint(
+        'Organization ID: $organizationId | Timezone: $organizationTimezone',
+      );
+
       // Get today's date in the organization's timezone
-      final todayStr = TimezoneHelper.getCurrentDateInOrgTimezone(organizationTimezone);
+      final todayStr = TimezoneHelper.getCurrentDateInOrgTimezone(
+        organizationTimezone,
+      );
       debugPrint('Today date in org TZ: $todayStr');
-      
+
       // Query attendance records for THIS organization directly via join
       // This ensures we get the most recent activities across ALL members
       final recordsResponse = await _supabase
@@ -658,7 +739,9 @@ class MemberPerformanceService {
           .order('updated_at', ascending: false)
           .limit(limit);
 
-      debugPrint('Found ${recordsResponse?.length ?? 0} today attendance records organization-wide');
+      debugPrint(
+        'Found ${recordsResponse?.length ?? 0} today attendance records organization-wide',
+      );
 
       if (recordsResponse == null || recordsResponse.isEmpty) {
         return [];
@@ -666,24 +749,25 @@ class MemberPerformanceService {
 
       // Enrich records and determine event times
       final activities = <Map<String, dynamic>>[];
-      
+
       for (final record in recordsResponse) {
-        final member = record['organization_members'] as Map<String, dynamic>? ?? {};
-        
+        final member =
+            record['organization_members'] as Map<String, dynamic>? ?? {};
+
         if (member.isNotEmpty) {
           // Determine the most recent activity
           String eventType = 'Unknown';
           String eventTime = '';
           String method = '';
           DateTime? eventDateTime;
-          
+
           final checkIn = record['actual_check_in'] as String?;
           final checkOut = record['actual_check_out'] as String?;
-          
+
           // Parse times to determine which is more recent
           DateTime? checkInTime;
           DateTime? checkOutTime;
-          
+
           try {
             if (checkIn != null && checkIn.isNotEmpty) {
               checkInTime = DateTime.parse(checkIn);
@@ -694,7 +778,7 @@ class MemberPerformanceService {
           } catch (e) {
             debugPrint('Error parsing times: $e');
           }
-          
+
           // Use the most recent event (check-out if both exist, otherwise check-in)
           if (checkOutTime != null && checkInTime != null) {
             if (checkOutTime.isAfter(checkInTime)) {
@@ -729,7 +813,7 @@ class MemberPerformanceService {
             }
             method = '';
           }
-          
+
           activities.add({
             ...record,
             'event_type': eventType,
@@ -753,8 +837,10 @@ class MemberPerformanceService {
 
       // Return only the requested limit
       final limitedActivities = activities.take(limit).toList();
-      
-      debugPrint('Processed ${limitedActivities.length} today activities (sorted by event time)');
+
+      debugPrint(
+        'Processed ${limitedActivities.length} today activities (sorted by event time)',
+      );
       return limitedActivities;
     } catch (e) {
       debugPrint('!!! ERROR in getRecentMemberActivities: $e');
@@ -779,7 +865,7 @@ class MemberPerformanceService {
 
   String _formatTimeAgo(String? eventTimeString) {
     if (eventTimeString == null) return 'Unknown time';
-    
+
     try {
       final eventTime = DateTime.parse(eventTimeString);
       final now = DateTime.now().toUtc();
@@ -813,7 +899,7 @@ class MemberPerformanceService {
       final now = DateTime.now().toUtc();
       final start = startDate ?? DateTime(now.year, now.month, 1);
       final end = endDate ?? DateTime(now.year, now.month + 1, 0);
-      
+
       final startDateStr = start.toIso8601String().split('T')[0];
       final endDateStr = end.toIso8601String().split('T')[0];
 
@@ -848,32 +934,36 @@ class MemberPerformanceService {
   }) async {
     try {
       final now = DateTime.now().toUtc();
-      
+
       // Default ranges based on period
       DateTime start;
       if (period == 'daily') {
-        start = startDate ?? now.subtract(const Duration(days: 7)); // Last 7 days
+        start =
+            startDate ?? now.subtract(const Duration(days: 7)); // Last 7 days
       } else if (period == 'weekly') {
-        start = startDate ?? DateTime(now.year, now.month - 2, 1); // Last 3 months
+        start =
+            startDate ?? DateTime(now.year, now.month - 2, 1); // Last 3 months
       } else {
         start = startDate ?? DateTime(now.year - 1, now.month, 1); // Last year
       }
-      
+
       final end = endDate ?? now;
-      
+
       final startDateStr = start.toIso8601String().split('T')[0];
       final endDateStr = end.toIso8601String().split('T')[0];
 
       // Get all members
       final members = await getOrganizationMembers(organizationId);
       final memberIds = members.map((m) => m['id'] as int).toList();
-      
+
       if (memberIds.isEmpty) return [];
 
       // Get attendance records for the period
       final records = await _supabase
           .from('attendance_records')
-          .select('organization_member_id, attendance_date, status, actual_check_in, actual_check_out, work_duration_minutes')
+          .select(
+            'organization_member_id, attendance_date, status, actual_check_in, actual_check_out, work_duration_minutes',
+          )
           .filter('organization_member_id', 'in', memberIds)
           .gte('attendance_date', startDateStr)
           .lte('attendance_date', endDateStr)
@@ -883,11 +973,11 @@ class MemberPerformanceService {
 
       // Group by period
       final Map<String, List<Map<String, dynamic>>> groupedData = {};
-      
+
       for (final record in records) {
         final dateStr = record['attendance_date'] as String;
         final date = DateTime.parse(dateStr);
-        
+
         String periodKey;
         if (period == 'daily') {
           periodKey = dateStr; // YYYY-MM-DD
@@ -899,7 +989,7 @@ class MemberPerformanceService {
           // Monthly
           periodKey = '${date.year}-${date.month.toString().padLeft(2, '0')}';
         }
-        
+
         if (!groupedData.containsKey(periodKey)) {
           groupedData[periodKey] = [];
         }
@@ -908,38 +998,45 @@ class MemberPerformanceService {
 
       // Calculate metrics for each period
       final trendData = <Map<String, dynamic>>[];
-      
+
       for (final entry in groupedData.entries) {
         final periodKey = entry.key;
         final periodRecords = entry.value;
-        
-        final presentCount = periodRecords.where((r) => r['status'] == 'present').length;
+
+        final presentCount = periodRecords
+            .where((r) => r['status'] == 'present')
+            .length;
         final totalCount = periodRecords.length;
         final attendanceRate = totalCount > 0 ? presentCount / totalCount : 0.0;
-        
+
         // Calculate average work hours
         int totalWorkMinutes = 0;
-        
+
         for (final record in periodRecords) {
           final minutes = record['work_duration_minutes'] as int? ?? 0;
           totalWorkMinutes += minutes;
         }
-        
+
         // Calculate average work hours for this period (across all records)
-        final avgWorkHours = totalCount > 0 ? (totalWorkMinutes / 60) / totalCount : 0.0;
-        
+        final avgWorkHours = totalCount > 0
+            ? (totalWorkMinutes / 60) / totalCount
+            : 0.0;
+
         trendData.add({
           'period': periodKey,
           'attendance_rate': attendanceRate,
           'avg_work_hours': avgWorkHours,
-          'productivity_score': (attendanceRate + (avgWorkHours / 8).clamp(0.0, 1.0)) / 2,
+          'productivity_score':
+              (attendanceRate + (avgWorkHours / 8).clamp(0.0, 1.0)) / 2,
           'total_records': totalCount,
           'present_count': presentCount,
         });
       }
 
       // Sort by period key to ensure chronological order
-      trendData.sort((a, b) => (a['period'] as String).compareTo(b['period'] as String));
+      trendData.sort(
+        (a, b) => (a['period'] as String).compareTo(b['period'] as String),
+      );
 
       return trendData;
     } catch (e) {
@@ -958,7 +1055,7 @@ class MemberPerformanceService {
       final now = DateTime.now().toUtc();
       final currStart = currentStart ?? DateTime(now.year, now.month, 1);
       final currEnd = currentEnd ?? now;
-      
+
       // Calculate previous period (same duration)
       final duration = currEnd.difference(currStart);
       final prevStart = currStart.subtract(duration);
@@ -1035,7 +1132,7 @@ class MemberPerformanceService {
 
       final members = await getOrganizationMembers(organizationId);
       final memberIds = members.map((m) => m['id'] as int).toList();
-      
+
       if (memberIds.isEmpty) return {};
 
       final startDateStr = start.toIso8601String().split('T')[0];
@@ -1044,7 +1141,9 @@ class MemberPerformanceService {
       // Get attendance records for all members
       final records = await _supabase
           .from('attendance_records')
-          .select('organization_member_id, status, actual_check_in, actual_check_out, late_minutes, overtime_minutes')
+          .select(
+            'organization_member_id, status, actual_check_in, actual_check_out, late_minutes, overtime_minutes',
+          )
           .filter('organization_member_id', 'in', memberIds)
           .gte('attendance_date', startDateStr)
           .lte('attendance_date', endDateStr);
@@ -1063,16 +1162,23 @@ class MemberPerformanceService {
 
       // Calculate achievements for each member
       final Map<int, List<String>> achievements = {};
-      
+
       for (final entry in memberRecords.entries) {
         final memberId = entry.key;
         final memberData = entry.value;
         final badges = <String>[];
 
         final totalDays = memberData.length;
-        final presentDays = memberData.where((r) => r['status'] == 'present').length;
-        final lateDays = memberData.where((r) => (r['late_minutes'] as int? ?? 0) > 0).length;
-        final overtimeTotal = memberData.fold<int>(0, (sum, r) => sum + (r['overtime_minutes'] as int? ?? 0));
+        final presentDays = memberData
+            .where((r) => r['status'] == 'present')
+            .length;
+        final lateDays = memberData
+            .where((r) => (r['late_minutes'] as int? ?? 0) > 0)
+            .length;
+        final overtimeTotal = memberData.fold<int>(
+          0,
+          (sum, r) => sum + (r['overtime_minutes'] as int? ?? 0),
+        );
 
         // 1. Perfect Attendance (100% attendance)
         if (totalDays > 0 && presentDays == totalDays) {
@@ -1103,12 +1209,15 @@ class MemberPerformanceService {
         }
 
         // 5. Overtime Champion (most overtime hours)
-        if (overtimeTotal > 600) { // More than 10 hours overtime
+        if (overtimeTotal > 600) {
+          // More than 10 hours overtime
           badges.add('overtime_champion');
         }
 
         // 6. Productivity Star (highest productivity score)
-        final punctualityRate = totalDays > 0 ? (totalDays - lateDays) / totalDays : 0.0;
+        final punctualityRate = totalDays > 0
+            ? (totalDays - lateDays) / totalDays
+            : 0.0;
         final productivityScore = (attendanceRate + punctualityRate) / 2;
         if (productivityScore > 0.9) {
           badges.add('productivity_star');
@@ -1134,52 +1243,61 @@ class MemberPerformanceService {
     DateTime? customEnd,
     String? sortBy, // 'productivity', 'attendance', 'punctuality', 'work_hours'
     int? departmentId,
+    String organizationTimezone = 'Asia/Jakarta',
   }) async {
     try {
       // Determine date range based on time period
       DateTime startDate;
-      DateTime endDate = DateTime.now().toUtc();
-      
+      // Use organization's local "now" instead of machine UTC
+      final nowInOrg = TimezoneHelper.getCurrentTimeInOrgTimezone(
+        organizationTimezone,
+      );
+      DateTime endDate = nowInOrg;
+
       switch (timePeriod) {
         case 'today':
-          startDate = DateTime(endDate.year, endDate.month, endDate.day);
+          startDate = DateTime(nowInOrg.year, nowInOrg.month, nowInOrg.day);
           break;
         case 'yesterday':
-          startDate = endDate.subtract(const Duration(days: 1));
+          startDate = nowInOrg.subtract(const Duration(days: 1));
           startDate = DateTime(startDate.year, startDate.month, startDate.day);
-          endDate = startDate.add(const Duration(hours: 23, minutes: 59, seconds: 59));
+          endDate = startDate.add(
+            const Duration(hours: 23, minutes: 59, seconds: 59),
+          );
           break;
         case 'week':
         case 'this_week':
-          startDate = endDate.subtract(Duration(days: endDate.weekday - 1));
+          startDate = nowInOrg.subtract(Duration(days: nowInOrg.weekday - 1));
           startDate = DateTime(startDate.year, startDate.month, startDate.day);
           break;
         case 'last_week':
-          startDate = endDate.subtract(Duration(days: endDate.weekday + 6));
+          startDate = nowInOrg.subtract(Duration(days: nowInOrg.weekday + 6));
           startDate = DateTime(startDate.year, startDate.month, startDate.day);
-          endDate = startDate.add(const Duration(days: 6, hours: 23, minutes: 59, seconds: 59));
+          endDate = startDate.add(
+            const Duration(days: 6, hours: 23, minutes: 59, seconds: 59),
+          );
           break;
         case 'month':
         case 'this_month':
-          startDate = DateTime(endDate.year, endDate.month, 1);
+          startDate = DateTime(nowInOrg.year, nowInOrg.month, 1);
           break;
         case 'last_month':
-          startDate = DateTime(endDate.year, endDate.month - 1, 1);
-          endDate = DateTime(endDate.year, endDate.month, 0, 23, 59, 59);
+          startDate = DateTime(nowInOrg.year, nowInOrg.month - 1, 1);
+          endDate = DateTime(nowInOrg.year, nowInOrg.month, 0, 23, 59, 59);
           break;
         case 'this_year':
-          startDate = DateTime(endDate.year, 1, 1);
+          startDate = DateTime(nowInOrg.year, 1, 1);
           break;
         case 'last_year':
-          startDate = DateTime(endDate.year - 1, 1, 1);
-          endDate = DateTime(endDate.year - 1, 12, 31, 23, 59, 59);
+          startDate = DateTime(nowInOrg.year - 1, 1, 1);
+          endDate = DateTime(nowInOrg.year - 1, 12, 31, 23, 59, 59);
           break;
         case 'custom':
-          startDate = customStart ?? DateTime(endDate.year, endDate.month, 1);
-          endDate = customEnd ?? endDate;
+          startDate = customStart ?? DateTime(nowInOrg.year, nowInOrg.month, 1);
+          endDate = customEnd ?? nowInOrg;
           break;
         default:
-          startDate = DateTime(endDate.year, endDate.month, 1);
+          startDate = DateTime(nowInOrg.year, nowInOrg.month, 1);
       }
 
       // Get members performance data
@@ -1203,11 +1321,16 @@ class MemberPerformanceService {
       filteredData.sort((a, b) {
         final aPerf = a['performance_stats'] as Map<String, dynamic>;
         final bPerf = b['performance_stats'] as Map<String, dynamic>;
-        
+
         double aValue;
         double bValue;
-        
+
         switch (sortBy) {
+          case 'productivity':
+            aValue = aPerf['productivity_score'] as double;
+            bValue = bPerf['productivity_score'] as double;
+            break;
+          case 'attendance':
           case 'total_attendance':
             aValue = (aPerf['present_days'] as num).toDouble();
             bValue = (bPerf['present_days'] as num).toDouble();
@@ -1220,10 +1343,10 @@ class MemberPerformanceService {
             aValue = (aPerf['present_days'] as num).toDouble();
             bValue = (bPerf['present_days'] as num).toDouble();
         }
-        
+
         // Debug string to verify sorting
         // debugPrint('Sort comparison: ${aValue} vs ${bValue} ($sortBy)');
-        
+
         return bValue.compareTo(aValue); // Descending order
       });
 
@@ -1234,4 +1357,3 @@ class MemberPerformanceService {
     }
   }
 }
-

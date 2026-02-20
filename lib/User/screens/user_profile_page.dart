@@ -7,17 +7,20 @@ import '../../attendance/services/biometric_service.dart';
 import '../../auth/services/role_service.dart';
 import '../widgets/user_bottom_nav.dart';
 import '../../auth/screens/login.dart';
+import '../../helpers/language_helper.dart';
 
 class UserProfilePage extends StatefulWidget {
   final int organizationMemberId;
   final Map<String, dynamic> memberData;
   final Map<String, dynamic>? userProfile;
+  final bool isDarkMode;
 
   const UserProfilePage({
     super.key,
     required this.organizationMemberId,
     required this.memberData,
     this.userProfile,
+    this.isDarkMode = false,
   });
 
   @override
@@ -32,7 +35,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
 
   bool _hasRegisteredFace = false;
   bool _isCheckingFace = true;
-  bool _isLoadingProfile = false;
   bool _isUploadingPhoto = false;
   bool _isEditMode = false;
   bool _isSaving = false;
@@ -46,7 +48,8 @@ class _UserProfilePageState extends State<UserProfilePage> {
   String _selectedGender = 'male';
   DateTime? _selectedDateOfBirth;
 
-  static const Color primaryColor = Color(0xFF4A90E2);
+  static const Color primaryColor = Color(0xFF4A1E79); // Indigo
+  static const Color accentColor = Color(0xFF8938DF); // Purple
 
   @override
   void initState() {
@@ -74,21 +77,15 @@ class _UserProfilePageState extends State<UserProfilePage> {
     _displayNameController.text = _userProfile?['display_name'] ?? '';
     _phoneController.text = _userProfile?['phone'] ?? '';
     _selectedGender = _userProfile?['jenis_kelamin'] ?? 'male';
-    _selectedDateOfBirth = _userProfile?['date_of_birth'] != null 
-        ? DateTime.parse(_userProfile!['date_of_birth']) 
+    _selectedDateOfBirth = _userProfile?['date_of_birth'] != null
+        ? DateTime.parse(_userProfile!['date_of_birth'])
         : null;
   }
 
   Future<void> _loadUserProfile() async {
-    setState(() {
-      _isLoadingProfile = true;
-    });
-
     try {
       final userId = _supabase.auth.currentUser?.id;
-      if (userId == null) {
-        throw Exception('User not logged in');
-      }
+      if (userId == null) throw Exception('User not logged in');
 
       final response = await _supabase
           .from('user_profiles')
@@ -100,16 +97,10 @@ class _UserProfilePageState extends State<UserProfilePage> {
         setState(() {
           _userProfile = response;
           _populateControllers();
-          _isLoadingProfile = false;
         });
       }
     } catch (e) {
-      print('!!! ERROR loading user profile: $e');
-      if (mounted) {
-        setState(() {
-          _isLoadingProfile = false;
-        });
-      }
+      debugPrint('!!! ERROR loading user profile: $e');
     }
   }
 
@@ -127,20 +118,21 @@ class _UserProfilePageState extends State<UserProfilePage> {
         });
       }
     } catch (e) {
-      print('Error loading organization info: $e');
+      debugPrint('Error loading organization info: $e');
     }
   }
 
   Future<void> _checkFaceRegistration() async {
+    if (!mounted) return;
     setState(() {
       _isCheckingFace = true;
     });
-    
+
     try {
       final hasRegistered = await _biometricService.hasRegisteredFace(
         widget.organizationMemberId,
       );
-      
+
       if (mounted) {
         setState(() {
           _hasRegisteredFace = hasRegistered;
@@ -148,7 +140,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
         });
       }
     } catch (e) {
-      print('!!! ERROR checking face registration: $e');
+      debugPrint('!!! ERROR checking face registration: $e');
       if (mounted) {
         setState(() {
           _hasRegisteredFace = false;
@@ -196,9 +188,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
       final filePath = 'mass-profile/$fileName';
 
       final file = File(image.path);
-      await _supabase.storage
-          .from('profile-photos')
-          .upload(filePath, file);
+      await _supabase.storage.from('profile-photos').upload(filePath, file);
 
       await _supabase
           .from('user_profiles')
@@ -209,19 +199,14 @@ class _UserProfilePageState extends State<UserProfilePage> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Profile photo updated successfully'),
-            backgroundColor: Colors.green,
-          ),
+          SnackBar(content: Text(AppLanguage.tr('User.profile.photo_updated'))),
         );
       }
     } catch (e) {
-      print('!!! ERROR uploading photo: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to upload photo: $e'),
-            backgroundColor: Colors.red,
+            content: Text('${AppLanguage.tr('User.profile.photo_failed')}: $e'),
           ),
         );
       }
@@ -234,10 +219,8 @@ class _UserProfilePageState extends State<UserProfilePage> {
     }
   }
 
-  Future<void> _saveProfile() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+  Future<void> _updateProfile() async {
+    if (!_formKey.currentState!.validate()) return;
 
     setState(() {
       _isSaving = true;
@@ -247,35 +230,14 @@ class _UserProfilePageState extends State<UserProfilePage> {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) throw Exception('User not logged in');
 
-      // Split display name menjadi first_name dan last_name
-      final displayName = _displayNameController.text.trim();
-      final nameParts = displayName.split(' ').where((n) => n.isNotEmpty).toList();
-      
-      String firstName;
-      String lastName;
-      
-      if (nameParts.isEmpty) {
-        firstName = 'User';
-        lastName = '';
-      } else if (nameParts.length == 1) {
-        firstName = nameParts[0];
-        lastName = '';
-      } else {
-        firstName = nameParts[0];
-        lastName = nameParts.sublist(1).join(' ');
-      }
-
       await _supabase
           .from('user_profiles')
           .update({
-            'first_name': firstName,
-            'last_name': lastName,
-            'display_name': displayName,
-            'phone': _phoneController.text.trim().isEmpty 
-                ? null 
-                : _phoneController.text.trim(),
+            'display_name': _displayNameController.text.trim(),
+            'phone': _phoneController.text.trim(),
             'jenis_kelamin': _selectedGender,
-            'date_of_birth': _selectedDateOfBirth?.toIso8601String().split('T')[0],
+            'date_of_birth': _selectedDateOfBirth?.toIso8601String(),
+            'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('id', userId);
 
@@ -284,836 +246,470 @@ class _UserProfilePageState extends State<UserProfilePage> {
       if (mounted) {
         setState(() {
           _isEditMode = false;
+          _isSaving = false;
         });
-
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Profile updated successfully'),
-            backgroundColor: Colors.green,
+          SnackBar(
+            content: Text(AppLanguage.tr('User.profile.profile_updated')),
           ),
         );
       }
     } catch (e) {
-      print('!!! ERROR saving profile: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to update profile: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
       if (mounted) {
         setState(() {
           _isSaving = false;
         });
-      }
-    }
-  }
-
-  void _toggleEditMode() {
-    setState(() {
-      _isEditMode = !_isEditMode;
-      if (!_isEditMode) {
-        _populateControllers();
-      }
-    });
-  }
-
-  Future<void> _selectDate() async {
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: _selectedDateOfBirth ?? 
-          DateTime.now().subtract(const Duration(days: 365 * 25)),
-      firstDate: DateTime(1900),
-      lastDate: DateTime.now(),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: ColorScheme.light(
-              primary: primaryColor,
-              onPrimary: Colors.white,
-              surface: Colors.white,
-              onSurface: Colors.black,
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${AppLanguage.tr('User.profile.profile_failed')}: $e',
             ),
           ),
-          child: child!,
         );
-      },
-    );
-    
-    if (picked != null) {
-      setState(() {
-        _selectedDateOfBirth = picked;
-      });
-    }
-  }
-
-  Future<void> _handleLogout() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Logout'),
-        content: const Text('Are you sure you want to logout?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Logout'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      try {
-        await _supabase.auth.signOut();
-        
-        if (mounted) {
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (context) => const ModernLoginScreen()),
-            (route) => false,
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Logout failed: $e'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
       }
     }
   }
 
   String _getFullName() {
-    if (_userProfile == null) return 'Loading...';
-    final firstName = _userProfile!['first_name'] ?? '';
-    final middleName = _userProfile!['middle_name'] ?? '';
-    final lastName = _userProfile!['last_name'] ?? '';
-    
-    if (middleName.isNotEmpty) {
-      return '$firstName $middleName $lastName'.trim();
-    }
-    return '$firstName $lastName'.trim();
+    final profile = _userProfile ?? widget.userProfile;
+    if (profile == null) return 'User';
+    final displayName = profile['display_name'] as String?;
+    if (displayName != null && displayName.trim().isNotEmpty)
+      return displayName.trim();
+    final firstName = profile['first_name'] as String? ?? '';
+    final lastName = profile['last_name'] as String? ?? '';
+    return '$firstName $lastName'.trim().isEmpty
+        ? 'User'
+        : '$firstName $lastName'.trim();
   }
 
   String? _getProfilePhotoUrl() {
-    if (_userProfile == null || _userProfile!['profile_photo_url'] == null) {
-      return null;
-    }
-    
-    final photoPath = _userProfile!['profile_photo_url'] as String;
-    
-    if (photoPath.trim().isEmpty) {
-      return null;
-    }
-    
-    if (photoPath.startsWith('http://') || photoPath.startsWith('https://')) {
-      return photoPath;
-    }
-    
+    final profile = _userProfile ?? widget.userProfile;
+    if (profile == null || profile['profile_photo_url'] == null) return null;
+    final photoPath = profile['profile_photo_url'] as String;
+    if (photoPath.trim().isEmpty) return null;
+    if (photoPath.startsWith('http')) return photoPath;
     return _supabase.storage
         .from('profile-photos')
         .getPublicUrl('mass-profile/$photoPath');
   }
 
-  String _formatDate(String? dateStr) {
-    if (dateStr == null) return 'Not set';
-    try {
-      final date = DateTime.parse(dateStr);
-      final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      return '${date.day} ${months[date.month - 1]} ${date.year}';
-    } catch (e) {
-      return 'Invalid date';
-    }
+  void _showLogoutDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(AppLanguage.tr('logout_confirm_title')),
+        content: Text(AppLanguage.tr('logout_confirm_message')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(AppLanguage.tr('cancel')),
+          ),
+          TextButton(
+            onPressed: () async {
+              await _supabase.auth.signOut();
+              if (mounted) {
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(
+                    builder: (context) => const ModernLoginScreen(),
+                  ),
+                  (route) => false,
+                );
+              }
+            },
+            child: Text(
+              AppLanguage.tr('logout_confirm_title'),
+              style: const TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
-      body: _isLoadingProfile
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              child: Column(
-                children: [
-                  // ---------- HEADER ----------
-                  Container(
-                    width: double.infinity,
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [Color(0xFF4A90E2), Color(0xFF5BA3F5)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.only(
-                        bottomLeft: Radius.circular(30),
-                        bottomRight: Radius.circular(30),
-                      ),
+      backgroundColor: widget.isDarkMode
+          ? const Color(0xFF1F0B38)
+          : const Color(0xFFF5F5F5),
+      body: RefreshIndicator(
+        onRefresh: _loadUserProfile,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Column(
+            children: [
+              // ---------- HEADER SECTION ----------
+              Container(
+                width: double.infinity,
+                padding: EdgeInsets.only(
+                  top: MediaQuery.of(context).padding.top + 16,
+                  bottom: 16,
+                ),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: widget.isDarkMode
+                        ? [const Color(0xFF2D1B4E), const Color(0xFF1F0B38)]
+                        : [const Color(0xFF8938DF), const Color(0xFF4A1E79)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                ),
+                child: Center(
+                  child: Text(
+                    AppLanguage.tr('User.profile.title'),
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
                     ),
-                    padding: const EdgeInsets.fromLTRB(0, 60, 0, 30),
-                    child: Column(
+                  ),
+                ),
+              ),
+
+              // ---------- PROFILE SECTION ----------
+              Container(
+                color: widget.isDarkMode
+                    ? const Color(0xFF1F0B38)
+                    : const Color(0xFFF5F5F5),
+                padding: const EdgeInsets.only(top: 32),
+                child: Column(
+                  children: [
+                    // Profile Photo
+                    Stack(
                       children: [
-                        // Profile Photo
-                        Stack(
-                          children: [
-                            Container(
-                              width: 120,
-                              height: 120,
+                        Container(
+                          width: 130,
+                          height: 130,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: widget.isDarkMode
+                                  ? const Color(0xFFD0BCFF)
+                                  : const Color(0xFF8938DF),
+                              width: 2,
+                            ),
+                          ),
+                          padding: const EdgeInsets.all(4),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.grey.shade200,
+                            ),
+                            child: ClipOval(
+                              child: _isUploadingPhoto
+                                  ? const Center(
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : _getProfilePhotoUrl() != null
+                                  ? Image.network(
+                                      _getProfilePhotoUrl()!,
+                                      fit: BoxFit.cover,
+                                      errorBuilder:
+                                          (context, error, stackTrace) =>
+                                              const Icon(
+                                                Icons.person,
+                                                size: 80,
+                                                color: Colors.grey,
+                                              ),
+                                    )
+                                  : Icon(
+                                      Icons.person,
+                                      size: 80,
+                                      color: Colors.grey.shade400,
+                                    ),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          bottom: 5,
+                          right: 5,
+                          child: GestureDetector(
+                            onTap: _pickAndUploadPhoto,
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
                               decoration: BoxDecoration(
+                                color: const Color(0xFF8938DF),
                                 shape: BoxShape.circle,
                                 border: Border.all(
                                   color: Colors.white,
-                                  width: 4,
+                                  width: 2,
                                 ),
-                                color: Colors.grey.shade100,
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.2),
-                                    blurRadius: 15,
-                                    offset: const Offset(0, 5),
-                                  ),
-                                ],
                               ),
-                              child: ClipOval(
-                                child: _isUploadingPhoto
-                                    ? const Center(
-                                        child: CircularProgressIndicator(
-                                          color: Colors.white,
-                                          strokeWidth: 3,
-                                        ),
-                                      )
-                                    : _getProfilePhotoUrl() != null
-                                        ? Image.network(
-                                            _getProfilePhotoUrl()!,
-                                            fit: BoxFit.cover,
-                                            errorBuilder: (context, error, stackTrace) {
-                                              return Icon(
-                                                Icons.person,
-                                                size: 60,
-                                                color: Colors.grey.shade400,
-                                              );
-                                            },
-                                          )
-                                        : Icon(
-                                            Icons.person,
-                                            size: 60,
-                                            color: Colors.grey.shade400,
-                                          ),
+                              child: const Icon(
+                                Icons.edit,
+                                color: Colors.white,
+                                size: 16,
                               ),
                             ),
-                            Positioned(
-                              bottom: 0,
-                              right: 0,
-                              child: GestureDetector(
-                                onTap: _isUploadingPhoto ? null : _pickAndUploadPhoto,
-                                child: Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    shape: BoxShape.circle,
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withOpacity(0.2),
-                                        blurRadius: 8,
-                                        offset: const Offset(0, 2),
-                                      ),
-                                    ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    // Name
+                    Text(
+                      _getFullName(),
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: widget.isDarkMode
+                            ? Colors.white
+                            : Colors.black87,
+                      ),
+                    ),
+                    // Email
+                    Text(
+                      _supabase.auth.currentUser?.email ?? 'No email',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: widget.isDarkMode
+                            ? const Color(0xFFD0BCFF)
+                            : const Color(0xFF8938DF),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // Location
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.location_on_outlined,
+                          size: 16,
+                          color: Colors.grey.shade500,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          _organization?['name'] ?? 'Loading...',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: widget.isDarkMode
+                                ? Colors.white54
+                                : Colors.grey.shade500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              // ---------- CONTENT AREA ----------
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 32,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          AppLanguage.tr('User.profile.account_information'),
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: widget.isDarkMode
+                                ? Colors.white54
+                                : Colors.grey.shade700,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: _isSaving
+                              ? null
+                              : () {
+                                  setState(() {
+                                    _isEditMode = !_isEditMode;
+                                    if (!_isEditMode) _populateControllers();
+                                  });
+                                },
+                          icon: Icon(
+                            _isEditMode ? Icons.close : Icons.edit_note_rounded,
+                            size: 18,
+                          ),
+                          label: Text(
+                            _isEditMode
+                                ? AppLanguage.tr('User.profile.cancel')
+                                : AppLanguage.tr('User.profile.edit'),
+                          ),
+                          style: TextButton.styleFrom(
+                            foregroundColor: const Color(0xFF8938DF),
+                            padding: EdgeInsets.zero,
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    if (_isEditMode)
+                      Form(
+                        key: _formKey,
+                        child: Column(
+                          children: [
+                            _buildTextField(
+                              label: AppLanguage.tr(
+                                'User.profile.display_name',
+                              ),
+                              controller: _displayNameController,
+                              icon: Icons.badge_outlined,
+                            ),
+                            const SizedBox(height: 12),
+                            _buildTextField(
+                              label: AppLanguage.tr(
+                                'User.profile.phone_number',
+                              ),
+                              controller: _phoneController,
+                              icon: Icons.phone_android_rounded,
+                              keyboardType: TextInputType.phone,
+                            ),
+                            const SizedBox(height: 24),
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton(
+                                onPressed: _isSaving ? null : _updateProfile,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF8938DF),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 12,
                                   ),
-                                  child: const Icon(
-                                    Icons.camera_alt,
-                                    color: primaryColor,
-                                    size: 20,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
                                   ),
                                 ),
+                                child: _isSaving
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          color: Colors.white,
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : Text(
+                                        AppLanguage.tr(
+                                          'User.profile.save_profile',
+                                        ),
+                                      ),
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 16),
-                        Text(
-                          _getFullName(),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
+                      )
+                    else
+                      Column(
+                        children: [
+                          _buildInfoRow(
+                            AppLanguage.tr('User.profile.display_name'),
+                            _displayNameController.text,
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _supabase.auth.currentUser?.email ?? 'No email',
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 14,
+                          _buildDivider(),
+                          _buildInfoRow(
+                            AppLanguage.tr('User.profile.phone_number'),
+                            _phoneController.text.isNotEmpty
+                                ? _phoneController.text
+                                : AppLanguage.tr('User.profile.not_set'),
                           ),
-                        ),
-                        if (_organization != null) ...[
-                          const SizedBox(height: 12),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: Colors.white.withOpacity(0.3),
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
-                                  Icons.business,
-                                  color: Colors.white,
-                                  size: 16,
-                                ),
-                                const SizedBox(width: 8),
-                                Flexible(
-                                  child: Text(
-                                    _organization!['name'] ?? 'Unknown Organization',
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
+                          _buildDivider(),
+                          _buildInfoRow(
+                            AppLanguage.tr('User.profile.gender'),
+                            _selectedGender.toUpperCase(),
+                          ),
+                          _buildDivider(),
+                          _buildInfoRow(
+                            AppLanguage.tr('User.profile.position'),
+                            _roleService.getRoleName(widget.memberData),
                           ),
                         ],
-                      ],
+                      ),
+
+                    const SizedBox(height: 32),
+                    Text(
+                      AppLanguage.tr('User.profile.security_status'),
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: widget.isDarkMode
+                            ? Colors.white54
+                            : Colors.grey.shade700,
+                        letterSpacing: 1.2,
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 16),
+                    _buildSecurityCard(),
+                    const SizedBox(height: 16),
+                    _buildLanguageSettingsCard(),
 
-                  const SizedBox(height: 24),
-
-                  // ---------- CONTENT ----------
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Column(
-                      children: [
-                        // Security Status Card
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                blurRadius: 10,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
+                    const SizedBox(height: 48),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _showLogoutDialog,
+                        icon: const Icon(Icons.logout_rounded),
+                        label: Text(AppLanguage.tr('logout_account')),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.redAccent,
+                          backgroundColor: widget.isDarkMode
+                              ? Colors.red.withValues(alpha: 0.1)
+                              : Colors.red.shade50.withValues(alpha: 0.3),
+                          side: BorderSide(
+                            color: Colors.redAccent.withValues(alpha: 0.5),
                           ),
-                          child: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: _hasRegisteredFace 
-                                      ? Colors.green.shade50 
-                                      : Colors.orange.shade50,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Icon(
-                                  _hasRegisteredFace 
-                                      ? Icons.verified_user 
-                                      : Icons.warning_amber_rounded,
-                                  color: _hasRegisteredFace 
-                                      ? Colors.green.shade700 
-                                      : Colors.orange.shade700,
-                                  size: 24,
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'Security Status',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.grey,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      _hasRegisteredFace 
-                                          ? 'Face Registered' 
-                                          : 'Not Registered',
-                                      style: const TextStyle(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.black87,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              if (_hasRegisteredFace)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 6,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.green.shade100,
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Text(
-                                    'Verified',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.green.shade700,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                )
-                              else
-                                GestureDetector(
-                                  onTap: _navigateToFaceRegistration,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 6,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: primaryColor,
-                                      borderRadius: BorderRadius.circular(20),
-                                    ),
-                                    child: const Text(
-                                      'Register',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
                           ),
                         ),
-
-                        const SizedBox(height: 16),
-
-                        // Employment Section
-                        Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                blurRadius: 10,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Text(
-                                    'Employment',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black87,
-                                    ),
-                                  ),
-                                  GestureDetector(
-                                    onTap: _toggleEditMode,
-                                    child: Icon(
-                                      Icons.edit,
-                                      size: 18,
-                                      color: primaryColor,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 16),
-                              
-                              // Grid: Gender & DOB
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: _buildCompactInfoItem(
-                                      Icons.person_outline,
-                                      'Gender',
-                                      _userProfile?['jenis_kelamin'] != null 
-                                          ? '${_userProfile!['jenis_kelamin'].toString()[0].toUpperCase()}${_userProfile!['jenis_kelamin'].toString().substring(1)}'
-                                          : 'Not set',
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: _buildCompactInfoItem(
-                                      Icons.cake_outlined,
-                                      'DOB',
-                                      _formatDate(_userProfile?['date_of_birth']),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              
-                              // Phone
-                              _buildCompactInfoItem(
-                                Icons.phone_outlined,
-                                'Phone',
-                                _userProfile?['phone'] ?? 'Not set',
-                              ),
-                              
-                              const Divider(height: 24),
-                              
-                              // Employee Info
-                              _buildCompactInfoItem(
-                                Icons.badge_outlined,
-                                'Employee Code',
-                                _userProfile?['employee_code'] ?? 'Not set',
-                              ),
-                              const SizedBox(height: 12),
-                              _buildCompactInfoItem(
-                                Icons.work_outline,
-                                'Position',
-                                widget.memberData['position']?['title'] ?? 'Not specified',
-                              ),
-                              const SizedBox(height: 12),
-                              _buildCompactInfoItem(
-                                Icons.business_outlined,
-                                'Department',
-                                widget.memberData['department']?['name'] ?? 'Not specified',
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        const SizedBox(height: 16),
-
-                        // Tracking Mode Section
-                        Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                blurRadius: 10,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Tracking Mode',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: Colors.grey,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              Row(
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: primaryColor.withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Icon(
-                                      Icons.fingerprint,
-                                      color: primaryColor,
-                                      size: 20,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  const Text(
-                                    'Face Recognition',
-                                    style: TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.black87,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        const SizedBox(height: 16),
-
-                        // Menu Items
-                        Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                blurRadius: 10,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            children: [
-                              _buildMenuItem(
-                                Icons.notifications_outlined,
-                                'Notifications',
-                                () {
-                                  // TODO: Navigate to notifications
-                                },
-                              ),
-                              Divider(height: 1, color: Colors.grey.shade200),
-                              _buildMenuItem(
-                                Icons.lock_outline,
-                                'Privacy & Security',
-                                () {
-                                  // TODO: Navigate to privacy settings
-                                },
-                              ),
-                              Divider(height: 1, color: Colors.grey.shade200),
-                              _buildMenuItem(
-                                Icons.logout,
-                                'Sign Out',
-                                _handleLogout,
-                                isDestructive: true,
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        const SizedBox(height: 80),
-                      ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-      // ---------- BOTTOM NAVIGATION ----------
+            ],
+          ),
+        ),
+      ),
       bottomNavigationBar: CustomBottomNav(
         currentIndex: 1,
+        isDarkMode: widget.isDarkMode,
         onTap: (index) {
-          switch (index) {
-            case 0:
-              Navigator.pop(context);
-              break;
-            case 1:
-              // Already on Profile
-              break;
-          }
+          if (index == 0) Navigator.pop(context);
         },
       ),
     );
   }
 
-  Widget _buildSectionCard({
-    required String title,
-    required IconData icon,
-    required List<Widget> children,
-    bool needsForm = false,
-  }) {
-    final cardContent = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, color: primaryColor),
-            const SizedBox(width: 12),
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        ...children,
-      ],
-    );
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: needsForm 
-          ? Form(key: _formKey, child: cardContent)
-          : cardContent,
-    );
-  }
-
-  Widget _buildEditableField({
-    required String label,
-    required TextEditingController controller,
-    TextInputType? keyboardType,
-    String? Function(String?)? validator,
-  }) {
+  Widget _buildInfoRow(String label, String? value) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(
             label,
             style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey.shade600,
+              fontSize: 15,
+              color: widget.isDarkMode ? Colors.white70 : Colors.grey.shade700,
               fontWeight: FontWeight.w500,
             ),
           ),
-          const SizedBox(height: 8),
-          TextFormField(
-            controller: controller,
-            keyboardType: keyboardType,
-            validator: validator,
-            decoration: InputDecoration(
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 12,
-              ),
-              filled: true,
-              fillColor: Colors.grey.shade50,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildGenderField() {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
           Text(
-            'Gender',
+            value ?? AppLanguage.tr('User.profile.not_set'),
             style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey.shade600,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: RadioListTile<String>(
-                  title: const Text('Male'),
-                  value: 'male',
-                  groupValue: _selectedGender,
-                  activeColor: primaryColor,
-                  contentPadding: EdgeInsets.zero,
-                  onChanged: (v) => setState(() => _selectedGender = v!),
-                ),
-              ),
-              Expanded(
-                child: RadioListTile<String>(
-                  title: const Text('Female'),
-                  value: 'female',
-                  groupValue: _selectedGender,
-                  activeColor: primaryColor,
-                  contentPadding: EdgeInsets.zero,
-                  onChanged: (v) => setState(() => _selectedGender = v!),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDateOfBirthField() {
-    final dateDisplay = _selectedDateOfBirth != null
-        ? '${_selectedDateOfBirth!.day.toString().padLeft(2, '0')}/${_selectedDateOfBirth!.month.toString().padLeft(2, '0')}/${_selectedDateOfBirth!.year}'
-        : 'Select date';
-    
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Date of Birth',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey.shade600,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 8),
-          InkWell(
-            onTap: _selectDate,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey.shade300),
-                borderRadius: BorderRadius.circular(12),
-                color: Colors.grey.shade50,
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    dateDisplay,
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: _selectedDateOfBirth != null 
-                          ? Colors.black87 
-                          : Colors.grey.shade600,
-                    ),
-                  ),
-                  Icon(
-                    Icons.calendar_today,
-                    size: 20,
-                    color: Colors.grey.shade600,
-                  ),
-                ],
-              ),
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: value != null
+                  ? (widget.isDarkMode ? Colors.white : Colors.black)
+                  : Colors.grey.shade400,
+              fontStyle: value != null ? FontStyle.normal : FontStyle.italic,
             ),
           ),
         ],
@@ -1121,110 +717,322 @@ class _UserProfilePageState extends State<UserProfilePage> {
     );
   }
 
-  Widget _buildInfoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 120,
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey.shade600,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(
-                fontSize: 14,
-                color: Colors.black87,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
-      ),
+  Widget _buildDivider() {
+    return Divider(
+      height: 1,
+      thickness: 1,
+      color: widget.isDarkMode
+          ? Colors.white.withOpacity(0.05)
+          : Colors.grey.withOpacity(0.1),
     );
   }
 
-  Widget _buildCompactInfoItem(IconData icon, String label, String value) {
+  Widget _buildSectionHeader(String label, IconData icon) {
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(
-          icon,
-          size: 18,
-          color: primaryColor,
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: Colors.grey,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: Colors.black87,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
+        Icon(icon, size: 20, color: primaryColor),
+        const SizedBox(width: 8),
+        Text(
+          label.toUpperCase(),
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: Colors.grey,
+            letterSpacing: 1.1,
           ),
         ),
       ],
     );
   }
 
-  Widget _buildMenuItem(
-    IconData icon,
-    String title,
-    VoidCallback onTap, {
-    bool isDestructive = false,
+  Widget _buildCard(List<Widget> children) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(children: children),
+    );
+  }
+
+  Widget _buildTextField({
+    required String label,
+    required TextEditingController controller,
+    required IconData icon,
+    bool enabled = true,
+    TextInputType keyboardType = TextInputType.text,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: TextFormField(
+        controller: controller,
+        enabled: enabled,
+        keyboardType: keyboardType,
+        decoration: InputDecoration(
+          labelText: label,
+          prefixIcon: Icon(
+            icon,
+            size: 22,
+            color: enabled ? primaryColor : Colors.grey,
+          ),
+          border: InputBorder.none,
+          labelStyle: TextStyle(
+            color: enabled ? primaryColor : Colors.grey,
+            fontSize: 14,
+          ),
+          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+        ),
+        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+      ),
+    );
+  }
+
+  Widget _buildSecurityCard() {
+    return _isCheckingFace
+        ? const Center(child: CircularProgressIndicator())
+        : Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: widget.isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(
+                    widget.isDarkMode ? 0.2 : 0.04,
+                  ),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: (_hasRegisteredFace ? Colors.green : Colors.orange)
+                        .withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    _hasRegisteredFace
+                        ? Icons.verified_user
+                        : Icons.warning_amber_rounded,
+                    color: _hasRegisteredFace ? Colors.green : Colors.orange,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _hasRegisteredFace
+                            ? AppLanguage.tr('User.profile.biometric_verified')
+                            : AppLanguage.tr('User.profile.action_required'),
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: widget.isDarkMode
+                              ? Colors.white
+                              : const Color(0xFF1F2937),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _hasRegisteredFace
+                            ? AppLanguage.tr('User.profile.biometric_ok')
+                            : AppLanguage.tr(
+                                'User.profile.register_face_prompt',
+                              ),
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: widget.isDarkMode
+                              ? Colors.white54
+                              : Colors.grey.shade500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (!_hasRegisteredFace)
+                  TextButton(
+                    onPressed: _navigateToFaceRegistration,
+                    child: Text(
+                      AppLanguage.tr('User.profile.register'),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF4A1E79),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+  }
+
+  Widget _buildLanguageSettingsCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: widget.isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(
+              alpha: widget.isDarkMode ? 0.2 : 0.04,
+            ),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF8938DF).withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.language_rounded,
+                  color: Color(0xFF8938DF),
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Text(
+                AppLanguage.tr('User.profile.language_settings'),
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: widget.isDarkMode
+                      ? Colors.white54
+                      : Colors.grey.shade700,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          ValueListenableBuilder<String>(
+            valueListenable: LanguageHelper.languageNotifier,
+            builder: (context, currentLang, _) {
+              return Column(
+                children: [
+                  _buildLanguageOption(
+                    code: LanguageHelper.indonesian,
+                    title: 'Bahasa Indonesia',
+                    subtitle: 'Indonesian',
+                    isSelected: currentLang == LanguageHelper.indonesian,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildLanguageOption(
+                    code: LanguageHelper.english,
+                    title: 'English',
+                    subtitle: 'International',
+                    isSelected: currentLang == LanguageHelper.english,
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLanguageOption({
+    required String code,
+    required String title,
+    required String subtitle,
+    required bool isSelected,
   }) {
     return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      onTap: () async {
+        await AppLanguage.setLanguage(code);
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: widget.isDarkMode
+              ? (isSelected
+                    ? const Color(0xFF8938DF).withOpacity(0.2)
+                    : Colors.white.withOpacity(0.08))
+              : (isSelected
+                    ? const Color(0xFF8938DF).withOpacity(0.08)
+                    : Colors.grey.shade50),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? const Color(0xFF8938DF) : Colors.transparent,
+            width: 1.5,
+          ),
+        ),
         child: Row(
           children: [
-            Icon(
-              icon,
-              size: 22,
-              color: isDestructive ? Colors.red : Colors.grey.shade700,
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Text(
-                title,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w500,
-                  color: isDestructive ? Colors.red : Colors.black87,
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: widget.isDarkMode
+                    ? Colors.white.withOpacity(0.1)
+                    : Colors.grey.shade200,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Center(
+                  child: Text(
+                    code == 'id' ? '🇮🇩' : '🇺🇸',
+                    style: const TextStyle(fontSize: 20),
+                  ),
                 ),
               ),
             ),
-            Icon(
-              Icons.chevron_right,
-              size: 20,
-              color: Colors.grey.shade400,
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: widget.isDarkMode ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: widget.isDarkMode
+                          ? Colors.white70
+                          : Colors.grey.shade600,
+                    ),
+                  ),
+                ],
+              ),
             ),
+            if (isSelected)
+              const Icon(
+                Icons.check_circle_rounded,
+                color: Color(0xFF8938DF),
+                size: 20,
+              ),
           ],
         ),
       ),

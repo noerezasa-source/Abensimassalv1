@@ -8,7 +8,8 @@ import 'login.dart';
 import 'package:absensimassal/helpers/language_helper.dart';
 
 class JoinOrganizationScreen extends StatefulWidget {
-  const JoinOrganizationScreen({super.key});
+  final bool fromDashboard; // ✅ Added to support joining multiple orgs
+  const JoinOrganizationScreen({super.key, this.fromDashboard = false});
 
   @override
   State<JoinOrganizationScreen> createState() => _JoinOrganizationScreenState();
@@ -16,7 +17,9 @@ class JoinOrganizationScreen extends StatefulWidget {
 
 class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
   // Colors extracted from design
-  static const Color backgroundColor = Color(0xFF050011); // Very dark purple/black
+  static const Color backgroundColor = Color(
+    0xFF050011,
+  ); // Very dark purple/black
   static const Color cardColor = Colors.white;
   static const Color primaryPurple = Color(0xFF9747FF); // Bright purple
   static const Color darkPurple = Color(0xFF6200EE); // Deep purple
@@ -29,7 +32,7 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
 
   bool _isJoining = false;
   bool _isInitializing = true;
-  
+
   String? _displayName;
   String? _profilePhotoUrl;
   String _currentLanguage = LanguageHelper.indonesian;
@@ -71,7 +74,9 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
       // Load user profile
       final profile = await Supabase.instance.client
           .from('user_profiles')
-          .select('first_name, last_name, display_name, profile_photo_url, email')
+          .select(
+            'first_name, last_name, display_name, profile_photo_url, email',
+          )
           .eq('id', user.id)
           .maybeSingle();
 
@@ -79,10 +84,11 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
 
       if (profile != null) {
         setState(() {
-          _displayName = profile['display_name'] ?? 
-                        profile['first_name'] ?? 
-                        user.email?.split('@')[0] ?? 
-                        'User';
+          _displayName =
+              profile['display_name'] ??
+              profile['first_name'] ??
+              user.email?.split('@')[0] ??
+              'User';
           _profilePhotoUrl = profile['profile_photo_url'];
         });
       } else {
@@ -92,14 +98,20 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
       }
 
       // Check if user already has organization
-      final memberData = await _roleService.getOrganizationMemberWithRole(user.id);
+      // ✅ Only auto-navigate if NOT coming from dashboard
+      if (!widget.fromDashboard) {
+        final memberData = await _roleService.getOrganizationMemberWithRole(
+          user.id,
+        );
 
-      if (memberData != null && mounted) {
-        final organizationMemberId = memberData['id'] as int;
-        _navigateToDashboard(organizationMemberId, memberData);
-      } else {
-        if (mounted) setState(() => _isInitializing = false);
+        if (memberData != null && mounted) {
+          final organizationMemberId = memberData['id'] as int;
+          _navigateToDashboard(organizationMemberId, memberData);
+          return; // Skip initialization if we are auto-navigating
+        }
       }
+
+      if (mounted) setState(() => _isInitializing = false);
     } catch (e) {
       debugPrint('Error initializing screen: $e');
       if (mounted) setState(() => _isInitializing = false);
@@ -121,10 +133,18 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
       if (user == null) throw Exception('User tidak terautentikasi');
 
       // Check membership
-      final existingMemberData = await _roleService.getOrganizationMemberWithRole(user.id);
-      if (existingMemberData != null) {
-        if (mounted) _navigateToDashboard(existingMemberData['id'] as int, existingMemberData);
-        return;
+      // ✅ Only block if not coming from dashboard (allow multiple orgs)
+      if (!widget.fromDashboard) {
+        final existingMemberData = await _roleService
+            .getOrganizationMemberWithRole(user.id);
+        if (existingMemberData != null) {
+          if (mounted)
+            _navigateToDashboard(
+              existingMemberData['id'] as int,
+              existingMemberData,
+            );
+          return;
+        }
       }
 
       // Validate code
@@ -152,12 +172,21 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
 
       if (existingMemberInOrg != null) {
         if (existingMemberInOrg['is_active'] == true) {
-          throw Exception('Anda sudah tergabung di organisasi ini');
+          // ✅ If already joined and from dashboard, just switch to it (don't error)
+          if (widget.fromDashboard) {
+            organizationMemberId = existingMemberInOrg['id'] as int;
+          } else {
+            throw Exception('Anda sudah tergabung di organisasi ini');
+          }
         } else {
           // Reactivate
           await Supabase.instance.client
               .from('organization_members')
-              .update({'is_active': true, 'work_location': 'field', 'updated_at': DateTime.now().toIso8601String()})
+              .update({
+                'is_active': true,
+                'work_location': 'field',
+                'updated_at': DateTime.now().toIso8601String(),
+              })
               .eq('id', existingMemberInOrg['id']);
           organizationMemberId = existingMemberInOrg['id'] as int;
         }
@@ -179,7 +208,9 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
         organizationMemberId = newMember['id'] as int;
       }
 
-      final memberData = await _roleService.getOrganizationMemberWithRole(user.id);
+      final memberData = await _roleService.getOrganizationMemberWithRole(
+        user.id,
+      );
       if (memberData == null) throw Exception('Failed to fetch member data');
 
       if (mounted) {
@@ -189,9 +220,11 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
       debugPrint('Error joining organization: $e');
       if (mounted) {
         String errorMessage = _tr('join_org_error');
-         if (e.toString().contains('tidak valid') || e.toString().contains('not valid')) {
+        if (e.toString().contains('tidak valid') ||
+            e.toString().contains('not valid')) {
           errorMessage = _tr('join_org_invalid_code');
-        } else if (e.toString().contains('sudah tergabung') || e.toString().contains('already')) {
+        } else if (e.toString().contains('sudah tergabung') ||
+            e.toString().contains('already')) {
           errorMessage = _tr('join_org_already_joined');
         }
         _showSnackBar(errorMessage, false);
@@ -201,25 +234,40 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
     }
   }
 
-  void _navigateToDashboard(int organizationMemberId, Map<String, dynamic> memberData) {
-    if (_roleService.isPetugas(memberData)) {
-      Navigator.of(context).pushReplacement(MaterialPageRoute(
-        builder: (context) => PetugasDashboardPage(
-          organizationMemberId: organizationMemberId,
-          memberData: memberData,
-        ),
-      ));
+  void _navigateToDashboard(
+    int organizationMemberId,
+    Map<String, dynamic> memberData,
+  ) {
+    final page = _roleService.isPetugas(memberData)
+        ? PetugasDashboardPage(
+            organizationMemberId: organizationMemberId,
+            memberData: memberData,
+          )
+        : UserDashboardPage(
+            organizationMemberId: organizationMemberId,
+            memberData: memberData,
+          );
+
+    final route = PageRouteBuilder(
+      pageBuilder: (context, animation, secondaryAnimation) => page,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        return FadeTransition(opacity: animation, child: child);
+      },
+    );
+
+    if (widget.fromDashboard) {
+      // ✅ Clear stack for fresh start on switch
+      Navigator.of(context).pushAndRemoveUntil(route, (route) => false);
     } else {
-      Navigator.of(context).pushReplacement(MaterialPageRoute(
-        builder: (context) => UserDashboardPage(
-          organizationMemberId: organizationMemberId,
-          memberData: memberData,
-        ),
-      ));
+      Navigator.of(context).pushReplacement(route);
     }
   }
 
-  void _showSuccessDialog(String orgName, int organizationMemberId, Map<String, dynamic> memberData) {
+  void _showSuccessDialog(
+    String orgName,
+    int organizationMemberId,
+    Map<String, dynamic> memberData,
+  ) {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -231,18 +279,36 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
           }
         });
         return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
           child: Container(
             padding: const EdgeInsets.all(32),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24)),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.check_circle, size: 60, color: Color(0xFF10B981)),
+                const Icon(
+                  Icons.check_circle,
+                  size: 60,
+                  color: Color(0xFF10B981),
+                ),
                 const SizedBox(height: 24),
-                Text(_tr('join_org_success_title'), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                Text(
+                  _tr('join_org_success_title'),
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 const SizedBox(height: 12),
-                Text(_tr('join_org_success_message').replaceAll('{org}', orgName), textAlign: TextAlign.center),
+                Text(
+                  _tr('join_org_success_message').replaceAll('{org}', orgName),
+                  textAlign: TextAlign.center,
+                ),
               ],
             ),
           ),
@@ -263,12 +329,14 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
 
   void _showSnackBar(String message, bool isSuccess) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(message),
-      backgroundColor: isSuccess ? const Color(0xFF10B981) : Colors.red,
-      behavior: SnackBarBehavior.floating,
-      margin: const EdgeInsets.all(16),
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isSuccess ? const Color(0xFF10B981) : Colors.red,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
+      ),
+    );
   }
 
   @override
@@ -301,41 +369,62 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
+                    if (widget.fromDashboard)
+                      IconButton(
+                        icon: const Icon(
+                          Icons.arrow_back,
+                          color: Colors.black87,
+                        ),
+                        onPressed: () => Navigator.pop(context),
+                      ),
                     Row(
                       children: [
                         Container(
                           padding: const EdgeInsets.all(2),
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            border: Border.all(color: Colors.blue.withOpacity(0.2), width: 1),
+                            border: Border.all(
+                              color: Colors.blue.withOpacity(0.2),
+                              width: 1,
+                            ),
                           ),
                           child: CircleAvatar(
                             radius: 18,
                             backgroundColor: Colors.grey.shade200,
-                            backgroundImage: _profilePhotoUrl != null ? NetworkImage(_profilePhotoUrl!) : null,
-                            child: _profilePhotoUrl == null 
-                              ? const Icon(Icons.person, color: Colors.grey, size: 20) 
-                              : null,
+                            backgroundImage: _profilePhotoUrl != null
+                                ? NetworkImage(_profilePhotoUrl!)
+                                : null,
+                            child: _profilePhotoUrl == null
+                                ? const Icon(
+                                    Icons.person,
+                                    color: Colors.grey,
+                                    size: 20,
+                                  )
+                                : null,
                           ),
                         ),
                         const SizedBox(width: 12),
                         Text(
                           _displayName ?? 'User',
                           style: const TextStyle(
-                            color: Colors.black87, // Fixed to Black for Light Theme
+                            color: Colors
+                                .black87, // Fixed to Black for Light Theme
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
                       ],
                     ),
-                    
+
                     // Logout Button
                     TextButton(
                       onPressed: _handleLogout,
                       style: TextButton.styleFrom(
                         backgroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(20),
                           side: BorderSide(color: Colors.grey.shade200),
@@ -355,19 +444,26 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                             ),
                           ),
                           const SizedBox(width: 4),
-                          Icon(Icons.logout, size: 14, color: Colors.red.shade600),
+                          Icon(
+                            Icons.logout,
+                            size: 14,
+                            color: Colors.red.shade600,
+                          ),
                         ],
                       ),
                     ),
                   ],
                 ),
-                
+
                 const Spacer(),
-                
+
                 // Central Card
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 24),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 40,
+                    horizontal: 24,
+                  ),
                   decoration: BoxDecoration(
                     color: cardColor,
                     borderRadius: BorderRadius.circular(32),
@@ -388,9 +484,9 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                         height: 60,
                         fit: BoxFit.contain,
                       ),
-                      
+
                       const SizedBox(height: 24),
-                      
+
                       const Text(
                         'Enter Access Key',
                         style: TextStyle(
@@ -400,9 +496,9 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                           letterSpacing: -0.5,
                         ),
                       ),
-                      
+
                       const SizedBox(height: 8),
-                      
+
                       const Padding(
                         padding: EdgeInsets.symmetric(horizontal: 16),
                         child: Text(
@@ -415,9 +511,9 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                           ),
                         ),
                       ),
-                      
+
                       const SizedBox(height: 32),
-                      
+
                       // Input Label
                       Align(
                         alignment: Alignment.centerLeft,
@@ -426,15 +522,15 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                           child: Text(
                             'ORGANIZATION CODE',
                             style: TextStyle(
-                               fontSize: 11,
-                               fontWeight: FontWeight.bold,
-                               color: textBlack.withOpacity(0.7),
-                               letterSpacing: 1.0,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: textBlack.withOpacity(0.7),
+                              letterSpacing: 1.0,
                             ),
                           ),
                         ),
                       ),
-                      
+
                       // Input Field
                       Container(
                         decoration: BoxDecoration(
@@ -457,16 +553,16 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                               letterSpacing: 2.0,
                             ),
                             border: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(vertical: 16),
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: 16,
+                            ),
                           ),
-                          inputFormatters: [
-                            UpperCaseTextFormatter(),
-                          ],
+                          inputFormatters: [UpperCaseTextFormatter()],
                         ),
                       ),
-                      
+
                       const SizedBox(height: 24),
-                      
+
                       // Join Button
                       SizedBox(
                         width: double.infinity,
@@ -474,7 +570,10 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                         child: Container(
                           decoration: BoxDecoration(
                             gradient: const LinearGradient(
-                              colors: [Color(0xFF9747FF), Color(0xFF6200EE)], // Purple gradient
+                              colors: [
+                                Color(0xFF9747FF),
+                                Color(0xFF6200EE),
+                              ], // Purple gradient
                               begin: Alignment.centerLeft,
                               end: Alignment.centerRight,
                             ),
@@ -488,7 +587,9 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                             ],
                           ),
                           child: ElevatedButton(
-                            onPressed: _isJoining ? null : _joinOrganizationWithCode,
+                            onPressed: _isJoining
+                                ? null
+                                : _joinOrganizationWithCode,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.transparent,
                               shadowColor: Colors.transparent,
@@ -498,9 +599,12 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                             ),
                             child: _isJoining
                                 ? const SizedBox(
-                                    width: 24, 
-                                    height: 24, 
-                                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                    width: 24,
+                                    height: 24,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2,
+                                    ),
                                   )
                                 : const Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
@@ -514,19 +618,26 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                                         ),
                                       ),
                                       SizedBox(width: 8),
-                                      Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 20),
+                                      Icon(
+                                        Icons.arrow_forward_rounded,
+                                        color: Colors.white,
+                                        size: 20,
+                                      ),
                                     ],
                                   ),
                           ),
                         ),
                       ),
-                      
+
                       const SizedBox(height: 24),
-                      
+
                       GestureDetector(
                         onTap: () {
                           // Help action
-                          _showSnackBar('Contact your administrator for code', true);
+                          _showSnackBar(
+                            'Contact your administrator for code',
+                            true,
+                          );
                         },
                         child: const Row(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -539,14 +650,18 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
-                            Icon(Icons.help_outline_rounded, size: 14, color: primaryPurple),
+                            Icon(
+                              Icons.help_outline_rounded,
+                              size: 14,
+                              color: primaryPurple,
+                            ),
                           ],
                         ),
                       ),
                     ],
                   ),
                 ),
-                
+
                 const Spacer(),
               ],
             ),
@@ -559,7 +674,10 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
 
 class UpperCaseTextFormatter extends TextInputFormatter {
   @override
-  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
     return TextEditingValue(
       text: newValue.text.toUpperCase(),
       selection: newValue.selection,

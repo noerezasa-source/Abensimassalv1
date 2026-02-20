@@ -42,19 +42,23 @@ dependencies:
   path: ^1.9.0
   table_calendar: ^3.0.9
   cached_network_image: ^3.3.0
-  intl: ^0.18.1
+  intl: any
   connectivity_plus: ^5.0.2
   tflite_flutter: ^0.12.1
   audioplayers: ^6.0.0
   sqflite: ^2.3.0  # Local SQLite database
   fl_chart: ^0.68.0  # Chart visualization
-
-  
+  flutter_map: ^6.1.0
+  latlong2: ^0.9.0
+  flutter_localizations:
+    sdk: flutter
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   google_fonts: ^6.3.2
+  app_settings: ^7.0.0
+  android_intent_plus: ^6.0.0
 
 dev_dependencies:
   flutter_test:
@@ -95,6 +99,14 @@ flutter:
     - assets/logo/app_logo_new.png
     - assets/models/
     - assets/sounds/
+    - assets/Lang/id/json/
+    - assets/Lang/en/json/
+    - assets/Lang/id/json/Petugas/
+    - assets/Lang/en/json/Petugas/
+    - assets/Lang/id/json/User/
+    - assets/Lang/en/json/User/
+    - assets/Lang/id/json/attendance/
+    - assets/Lang/en/json/attendance/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

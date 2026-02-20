@@ -15,13 +15,14 @@ import '../../auth/screens/login.dart';
 import 'petugas_dashboard.dart';
 import 'petugas_members_page.dart';
 import 'petugas_records_page.dart';
+import '../../helpers/language_helper.dart';
 
 class PetugasProfilePage extends StatefulWidget {
   final int organizationMemberId;
   final Map<String, dynamic> memberData;
   final Map<String, dynamic>? userProfile;
   final bool isDarkMode;
-  
+
   const PetugasProfilePage({
     super.key,
     required this.organizationMemberId,
@@ -90,85 +91,89 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
     super.dispose();
   }
 
-void _handleNavigation(int index) {
-  if (index == _currentNavIndex) {
-    return;
-  }
+  void _handleNavigation(int index) {
+    if (index == _currentNavIndex) {
+      return;
+    }
 
-  setState(() {
-    _currentNavIndex = index;
-  });
+    setState(() {
+      _currentNavIndex = index;
+    });
 
-  switch (index) {
-    case 0:
-      // Home - kembali ke dashboard
-      Navigator.popUntil(context, (route) => route.isFirst);
-      break;
-      
-    case 1:
-      // Member
-      Navigator.push<bool>(
-        context,
-        PageRouteBuilder(
-          transitionDuration: Duration.zero,
-          reverseTransitionDuration: Duration.zero,
-          pageBuilder: (context, _, __) => Container(
-            color: widget.isDarkMode ? const Color(0xFF1F0B38) : const Color(0xFFF8F9FA),
-            child: PetugasMembersPage(
-              organizationMemberId: widget.organizationMemberId,
-              memberData: widget.memberData,
-              userProfile: _userProfile ?? widget.userProfile,
-              isDarkMode: widget.isDarkMode,
+    switch (index) {
+      case 0:
+        // Home - kembali ke dashboard
+        Navigator.popUntil(context, (route) => route.isFirst);
+        break;
+
+      case 1:
+        // Member
+        Navigator.push<bool>(
+          context,
+          PageRouteBuilder(
+            transitionDuration: Duration.zero,
+            reverseTransitionDuration: Duration.zero,
+            pageBuilder: (context, _, __) => Container(
+              color: widget.isDarkMode
+                  ? const Color(0xFF1F0B38)
+                  : const Color(0xFFF8F9FA),
+              child: PetugasMembersPage(
+                organizationMemberId: widget.organizationMemberId,
+                memberData: widget.memberData,
+                userProfile: _userProfile ?? widget.userProfile,
+                isDarkMode: widget.isDarkMode,
+              ),
             ),
           ),
-        ),
-      ).then((_) {
-        if (mounted) {
-          setState(() {
-            _currentNavIndex = 3; // Kembali ke Profile index
-          });
-        }
-      });
-      break;
-      
-    case 2:
-      // Records - Navigate to Records Page
-      Navigator.push<bool>(
-        context,
-        PageRouteBuilder(
-          transitionDuration: Duration.zero,
-          reverseTransitionDuration: Duration.zero,
-          pageBuilder: (context, _, __) => Container(
-            color: widget.isDarkMode ? const Color(0xFF1F0B38) : const Color(0xFFF8F9FA),
-            child: PetugasRecordsPage(
-              organizationMemberId: widget.organizationMemberId,
-              memberData: widget.memberData,
-              userProfile: _userProfile ?? widget.userProfile,
-              isDarkMode: widget.isDarkMode,
+        ).then((_) {
+          if (mounted) {
+            setState(() {
+              _currentNavIndex = 3; // Kembali ke Profile index
+            });
+          }
+        });
+        break;
+
+      case 2:
+        // Records - Navigate to Records Page
+        Navigator.push<bool>(
+          context,
+          PageRouteBuilder(
+            transitionDuration: Duration.zero,
+            reverseTransitionDuration: Duration.zero,
+            pageBuilder: (context, _, __) => Container(
+              color: widget.isDarkMode
+                  ? const Color(0xFF1F0B38)
+                  : const Color(0xFFF8F9FA),
+              child: PetugasRecordsPage(
+                organizationMemberId: widget.organizationMemberId,
+                memberData: widget.memberData,
+                userProfile: _userProfile ?? widget.userProfile,
+                isDarkMode: widget.isDarkMode,
+              ),
             ),
           ),
-        ),
-      ).then((_) {
-        if (mounted) {
-          setState(() {
-            _currentNavIndex = 3; // Kembali ke Profile index
-          });
-        }
-      });
-      break;
-      
-    case 3:
-      // Profile - stay on current page
-      break;
+        ).then((_) {
+          if (mounted) {
+            setState(() {
+              _currentNavIndex = 3; // Kembali ke Profile index
+            });
+          }
+        });
+        break;
+
+      case 3:
+        // Profile - stay on current page
+        break;
+    }
   }
-}
 
   void _populateControllers() {
     _displayNameController.text = _userProfile?['display_name'] ?? '';
     _phoneController.text = _userProfile?['phone'] ?? '';
     _selectedGender = _userProfile?['jenis_kelamin'] ?? 'male';
-    _selectedDateOfBirth = _userProfile?['date_of_birth'] != null 
-        ? DateTime.parse(_userProfile!['date_of_birth']) 
+    _selectedDateOfBirth = _userProfile?['date_of_birth'] != null
+        ? DateTime.parse(_userProfile!['date_of_birth'])
         : null;
   }
 
@@ -234,7 +239,9 @@ void _handleNavigation(int index) {
         setState(() {
           _attendanceMode = mode;
         });
-        debugPrint('Attendance mode loaded: $_attendanceMode for org $organizationId');
+        debugPrint(
+          'Attendance mode loaded: $_attendanceMode for org $organizationId',
+        );
       }
     } catch (e) {
       debugPrint('Error loading attendance mode: $e');
@@ -259,8 +266,9 @@ void _handleNavigation(int index) {
     });
 
     try {
-      final record =
-          await _attendanceService.getTodayAttendance(widget.organizationMemberId);
+      final record = await _attendanceService.getTodayAttendance(
+        widget.organizationMemberId,
+      );
       if (mounted) {
         setState(() {
           _todayAttendance = record;
@@ -300,12 +308,12 @@ void _handleNavigation(int index) {
     setState(() {
       _isCheckingFace = true;
     });
-    
+
     try {
       final hasRegistered = await _biometricService.hasRegisteredFace(
         widget.organizationMemberId,
       );
-      
+
       if (mounted) {
         setState(() {
           _hasRegisteredFace = hasRegistered;
@@ -361,9 +369,7 @@ void _handleNavigation(int index) {
       final filePath = 'mass-profile/$fileName';
 
       final file = File(image.path);
-      await _supabase.storage
-          .from('profile-photos')
-          .upload(filePath, file);
+      await _supabase.storage.from('profile-photos').upload(filePath, file);
 
       await _supabase
           .from('user_profiles')
@@ -414,11 +420,14 @@ void _handleNavigation(int index) {
 
       // Split display name menjadi first_name dan last_name
       final displayName = _displayNameController.text.trim();
-      final nameParts = displayName.split(' ').where((n) => n.isNotEmpty).toList();
-      
+      final nameParts = displayName
+          .split(' ')
+          .where((n) => n.isNotEmpty)
+          .toList();
+
       String firstName;
       String lastName;
-      
+
       if (nameParts.isEmpty) {
         firstName = 'User';
         lastName = '';
@@ -436,11 +445,13 @@ void _handleNavigation(int index) {
             'first_name': firstName,
             'last_name': lastName,
             'display_name': displayName,
-            'phone': _phoneController.text.trim().isEmpty 
-                ? null 
+            'phone': _phoneController.text.trim().isEmpty
+                ? null
                 : _phoneController.text.trim(),
             'jenis_kelamin': _selectedGender,
-            'date_of_birth': _selectedDateOfBirth?.toIso8601String().split('T')[0],
+            'date_of_birth': _selectedDateOfBirth?.toIso8601String().split(
+              'T',
+            )[0],
           })
           .eq('id', userId);
 
@@ -489,7 +500,8 @@ void _handleNavigation(int index) {
   Future<void> _selectDate() async {
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: _selectedDateOfBirth ?? 
+      initialDate:
+          _selectedDateOfBirth ??
           DateTime.now().subtract(const Duration(days: 365 * 25)),
       firstDate: DateTime(1900),
       lastDate: DateTime.now(),
@@ -507,7 +519,7 @@ void _handleNavigation(int index) {
         );
       },
     );
-    
+
     if (picked != null) {
       setState(() {
         _selectedDateOfBirth = picked;
@@ -541,7 +553,7 @@ void _handleNavigation(int index) {
     if (confirm == true) {
       try {
         await _supabase.auth.signOut();
-        
+
         if (mounted) {
           Navigator.of(context).pushAndRemoveUntil(
             MaterialPageRoute(builder: (context) => const ModernLoginScreen()),
@@ -566,7 +578,7 @@ void _handleNavigation(int index) {
     final firstName = _userProfile!['first_name'] ?? '';
     final middleName = _userProfile!['middle_name'] ?? '';
     final lastName = _userProfile!['last_name'] ?? '';
-    
+
     if (middleName.isNotEmpty) {
       return '$firstName $middleName $lastName'.trim();
     }
@@ -577,17 +589,17 @@ void _handleNavigation(int index) {
     if (_userProfile == null || _userProfile!['profile_photo_url'] == null) {
       return null;
     }
-    
+
     final photoPath = _userProfile!['profile_photo_url'] as String;
-    
+
     if (photoPath.trim().isEmpty) {
       return null;
     }
-    
+
     if (photoPath.startsWith('http://') || photoPath.startsWith('https://')) {
       return photoPath;
     }
-    
+
     return _supabase.storage
         .from('profile-photos')
         .getPublicUrl('mass-profile/$photoPath');
@@ -597,7 +609,20 @@ void _handleNavigation(int index) {
     if (dateStr == null) return 'Not set';
     try {
       final date = DateTime.parse(dateStr);
-      final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      final months = [
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
+      ];
       return '${date.day} ${months[date.month - 1]} ${date.year}';
     } catch (e) {
       return 'Invalid date';
@@ -619,12 +644,18 @@ void _handleNavigation(int index) {
         return false;
       },
       child: Scaffold(
-        backgroundColor: widget.isDarkMode ? primaryDark : const Color(0xFFF8F9FA),
+        backgroundColor: widget.isDarkMode
+            ? primaryDark
+            : const Color(0xFFF8F9FA),
         body: _isLoadingProfile
-            ? Center(child: CircularProgressIndicator(color: widget.isDarkMode ? Colors.white : primaryColor))
+            ? Center(
+                child: CircularProgressIndicator(
+                  color: widget.isDarkMode ? Colors.white : primaryColor,
+                ),
+              )
             : Column(
                 children: [
-                   _buildHeader(),
+                  _buildHeader(),
                   Expanded(
                     child: SingleChildScrollView(
                       child: Column(
@@ -636,10 +667,14 @@ void _handleNavigation(int index) {
                           _buildFaceRecognitionCard(),
                           const SizedBox(height: 16),
                           _buildAttendanceSettingsCard(),
+                          const SizedBox(height: 16),
+                          _buildLanguageSettingsCard(),
                           const SizedBox(height: 32),
                           // LOGOUT BUTTON
                           Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24.0,
+                            ),
                             child: SizedBox(
                               width: double.infinity,
                               child: ElevatedButton.icon(
@@ -647,13 +682,23 @@ void _handleNavigation(int index) {
                                 icon: const Icon(Icons.logout),
                                 label: const Text('Logout'),
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: widget.isDarkMode ? Colors.red.withOpacity(0.15) : Colors.red.shade50,
-                                  foregroundColor: widget.isDarkMode ? Colors.redAccent.shade100 : Colors.red.shade700,
+                                  backgroundColor: widget.isDarkMode
+                                      ? Colors.red.withOpacity(0.15)
+                                      : Colors.red.shade50,
+                                  foregroundColor: widget.isDarkMode
+                                      ? Colors.redAccent.shade100
+                                      : Colors.red.shade700,
                                   elevation: 0,
-                                  padding: const EdgeInsets.symmetric(vertical: 16),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                  ),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(15),
-                                    side: BorderSide(color: Colors.red.withOpacity(widget.isDarkMode ? 0.3 : 0.2)),
+                                    side: BorderSide(
+                                      color: Colors.red.withOpacity(
+                                        widget.isDarkMode ? 0.3 : 0.2,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -692,11 +737,11 @@ void _handleNavigation(int index) {
           end: Alignment.bottomCenter,
         ),
       ),
-      child: const Text(
-        'Profiles',
+      child: Text(
+        AppLanguage.tr('profile'),
         textAlign: TextAlign.center,
-        style: TextStyle(
-          fontSize: 20, // Reduced from 24
+        style: const TextStyle(
+          fontSize: 20,
           fontWeight: FontWeight.bold,
           color: Colors.white,
         ),
@@ -721,10 +766,7 @@ void _handleNavigation(int index) {
                 height: 130,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(
-                    color: const Color(0xFF8938DF),
-                    width: 2,
-                  ),
+                  border: Border.all(color: const Color(0xFF8938DF), width: 2),
                 ),
                 padding: const EdgeInsets.all(4),
                 child: Container(
@@ -734,15 +776,26 @@ void _handleNavigation(int index) {
                   ),
                   child: ClipOval(
                     child: _isUploadingPhoto
-                        ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+                        ? const Center(
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
                         : (photoUrl != null
-                            ? CachedNetworkImage(
-                                imageUrl: photoUrl,
-                                fit: BoxFit.cover,
-                                placeholder: (context, url) => Container(color: Colors.grey.shade100),
-                                errorWidget: (context, url, error) => Icon(Icons.person, size: 80, color: Colors.grey.shade400),
-                              )
-                            : Icon(Icons.person, size: 80, color: Colors.grey.shade400)),
+                              ? CachedNetworkImage(
+                                  imageUrl: photoUrl,
+                                  fit: BoxFit.cover,
+                                  placeholder: (context, url) =>
+                                      Container(color: Colors.grey.shade100),
+                                  errorWidget: (context, url, error) => Icon(
+                                    Icons.person,
+                                    size: 80,
+                                    color: Colors.grey.shade400,
+                                  ),
+                                )
+                              : Icon(
+                                  Icons.person,
+                                  size: 80,
+                                  color: Colors.grey.shade400,
+                                )),
                   ),
                 ),
               ),
@@ -758,7 +811,11 @@ void _handleNavigation(int index) {
                       shape: BoxShape.circle,
                       border: Border.all(color: Colors.white, width: 2),
                     ),
-                    child: const Icon(Icons.edit, color: Colors.white, size: 16),
+                    child: const Icon(
+                      Icons.edit,
+                      color: Colors.white,
+                      size: 16,
+                    ),
                   ),
                 ),
               ),
@@ -779,7 +836,9 @@ void _handleNavigation(int index) {
             userEmail,
             style: TextStyle(
               fontSize: 16,
-              color: widget.isDarkMode ? const Color(0xFFB066FF) : const Color(0xFF8938DF),
+              color: widget.isDarkMode
+                  ? const Color(0xFFB066FF)
+                  : const Color(0xFF8938DF),
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -788,13 +847,21 @@ void _handleNavigation(int index) {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.location_on_outlined, size: 16, color: widget.isDarkMode ? Colors.white60 : Colors.grey.shade500),
+              Icon(
+                Icons.location_on_outlined,
+                size: 16,
+                color: widget.isDarkMode
+                    ? Colors.white60
+                    : Colors.grey.shade500,
+              ),
               const SizedBox(width: 4),
               Text(
                 location,
                 style: TextStyle(
                   fontSize: 14,
-                  color: widget.isDarkMode ? Colors.white60 : Colors.grey.shade500,
+                  color: widget.isDarkMode
+                      ? Colors.white60
+                      : Colors.grey.shade500,
                 ),
               ),
             ],
@@ -805,15 +872,21 @@ void _handleNavigation(int index) {
   }
 
   Widget _buildAccountInformation() {
-    final displayName = _displayNameController.text.isNotEmpty ? _displayNameController.text : _getFullName();
-    final phone = _phoneController.text.isNotEmpty ? _phoneController.text : (_userProfile?['phone'] ?? 'Not set');
+    final displayName = _displayNameController.text.isNotEmpty
+        ? _displayNameController.text
+        : _getFullName();
+    final phone = _phoneController.text.isNotEmpty
+        ? _phoneController.text
+        : (_userProfile?['phone'] ?? 'Not set');
     final jeniskelaminValue = _userProfile?['jenis_kelamin'];
     final employeeCode = _userProfile?['employee_code'] ?? 'Not set';
     final position = _roleService.getRoleName(widget.memberData);
-    
-    final dobStr = _selectedDateOfBirth != null 
-        ? _formatDate(_selectedDateOfBirth!.toIso8601String()) 
-        : (_userProfile?['date_of_birth'] != null ? _formatDate(_userProfile!['date_of_birth']) : 'Not set');
+
+    final dobStr = _selectedDateOfBirth != null
+        ? _formatDate(_selectedDateOfBirth!.toIso8601String())
+        : (_userProfile?['date_of_birth'] != null
+              ? _formatDate(_userProfile!['date_of_birth'])
+              : 'Not set');
 
     final isMale = _selectedGender == 'male';
 
@@ -826,20 +899,31 @@ void _handleNavigation(int index) {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'ACCOUNT INFORMATION',
+                AppLanguage.tr('account_information'),
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w800,
-                  color: widget.isDarkMode ? Colors.white70 : Colors.grey.shade700,
+                  color: widget.isDarkMode
+                      ? Colors.white70
+                      : Colors.grey.shade700,
                   letterSpacing: 1.2,
                 ),
               ),
               TextButton.icon(
                 onPressed: _isSaving ? null : _toggleEditMode,
-                icon: Icon(_isEditMode ? Icons.close : Icons.edit_note_rounded, size: 18),
-                label: Text(_isEditMode ? 'Cancel' : 'Edit'),
+                icon: Icon(
+                  _isEditMode ? Icons.close : Icons.edit_note_rounded,
+                  size: 18,
+                ),
+                label: Text(
+                  _isEditMode
+                      ? AppLanguage.tr('cancel')
+                      : AppLanguage.tr('edit'),
+                ),
                 style: TextButton.styleFrom(
-                  foregroundColor: widget.isDarkMode ? const Color(0xFFB066FF) : const Color(0xFF8938DF),
+                  foregroundColor: widget.isDarkMode
+                      ? const Color(0xFFB066FF)
+                      : const Color(0xFF8938DF),
                   padding: EdgeInsets.zero,
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -854,12 +938,13 @@ void _handleNavigation(int index) {
               child: Column(
                 children: [
                   _buildEditableField(
-                    label: 'Display Name',
+                    label: AppLanguage.tr('display_name'),
                     controller: _displayNameController,
-                    validator: (v) => v!.isEmpty ? 'Name is required' : null,
+                    validator: (v) =>
+                        v!.isEmpty ? AppLanguage.tr('name_required') : null,
                   ),
                   _buildEditableField(
-                    label: 'Phone Number',
+                    label: AppLanguage.tr('phone_number'),
                     controller: _phoneController,
                     keyboardType: TextInputType.phone,
                   ),
@@ -874,11 +959,20 @@ void _handleNavigation(int index) {
                         backgroundColor: const Color(0xFF8938DF),
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
                       child: _isSaving
-                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                          : const Text('Save Profile'),
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : Text(AppLanguage.tr('save_profile')),
                     ),
                   ),
                 ],
@@ -887,17 +981,32 @@ void _handleNavigation(int index) {
           else
             Column(
               children: [
-                _buildInfoRowDesign('Display Name', displayName),
+                _buildInfoRowDesign(
+                  AppLanguage.tr('display_name'),
+                  displayName,
+                ),
                 _buildDivider(),
-                _buildInfoRowDesign('Phone Number', phone),
+                _buildInfoRowDesign(AppLanguage.tr('phone_number'), phone),
                 _buildDivider(),
-                _buildInfoRowDesign('Gender', jeniskelaminValue != null ? (jeniskelaminValue == 'male' ? 'Male' : 'Female') : (isMale ? 'Male' : 'Female')),
+                _buildInfoRowDesign(
+                  AppLanguage.tr('gender'),
+                  jeniskelaminValue != null
+                      ? (jeniskelaminValue == 'male'
+                            ? AppLanguage.tr('male')
+                            : AppLanguage.tr('female'))
+                      : (isMale
+                            ? AppLanguage.tr('male')
+                            : AppLanguage.tr('female')),
+                ),
                 _buildDivider(),
-                _buildInfoRowDesign('Date of Birth', dobStr),
+                _buildInfoRowDesign(AppLanguage.tr('date_of_birth'), dobStr),
                 _buildDivider(),
-                _buildInfoRowDesign('Employee Code', employeeCode),
+                _buildInfoRowDesign(
+                  AppLanguage.tr('employee_code'),
+                  employeeCode,
+                ),
                 _buildDivider(),
-                _buildInfoRowDesign('Position', position),
+                _buildInfoRowDesign(AppLanguage.tr('position'), position),
               ],
             ),
         ],
@@ -915,7 +1024,9 @@ void _handleNavigation(int index) {
             label,
             style: TextStyle(
               fontSize: 15,
-              color: widget.isDarkMode ? Colors.white.withOpacity(0.7) : Colors.grey.shade700,
+              color: widget.isDarkMode
+                  ? Colors.white.withOpacity(0.7)
+                  : Colors.grey.shade700,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -924,7 +1035,7 @@ void _handleNavigation(int index) {
             style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w600,
-              color: value != null 
+              color: value != null
                   ? (widget.isDarkMode ? Colors.white : Colors.black)
                   : (widget.isDarkMode ? Colors.white24 : Colors.grey.shade400),
               fontStyle: value != null ? FontStyle.normal : FontStyle.italic,
@@ -939,9 +1050,12 @@ void _handleNavigation(int index) {
     return Divider(
       height: 1,
       thickness: 1,
-      color: widget.isDarkMode ? Colors.white.withOpacity(0.05) : Colors.grey.withOpacity(0.1),
+      color: widget.isDarkMode
+          ? Colors.white.withOpacity(0.05)
+          : Colors.grey.withOpacity(0.1),
     );
   }
+
   Widget _buildSectionCard({
     required String title,
     required IconData icon,
@@ -953,7 +1067,10 @@ void _handleNavigation(int index) {
       children: [
         Row(
           children: [
-            Icon(icon, color: widget.isDarkMode ? const Color(0xFFB066FF) : primaryColor),
+            Icon(
+              icon,
+              color: widget.isDarkMode ? const Color(0xFFB066FF) : primaryColor,
+            ),
             const SizedBox(width: 12),
             Text(
               title,
@@ -983,9 +1100,7 @@ void _handleNavigation(int index) {
           ),
         ],
       ),
-      child: needsForm 
-          ? Form(key: _formKey, child: cardContent)
-          : cardContent,
+      child: needsForm ? Form(key: _formKey, child: cardContent) : cardContent,
     );
   }
 
@@ -1020,20 +1135,36 @@ void _handleNavigation(int index) {
             decoration: InputDecoration(
               isDense: true,
               filled: true,
-              fillColor: widget.isDarkMode ? Colors.white.withOpacity(0.05) : Colors.grey.shade50,
+              fillColor: widget.isDarkMode
+                  ? Colors.white.withOpacity(0.05)
+                  : Colors.grey.shade50,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: widget.isDarkMode ? Colors.white12 : Colors.grey.shade300),
+                borderSide: BorderSide(
+                  color: widget.isDarkMode
+                      ? Colors.white12
+                      : Colors.grey.shade300,
+                ),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: widget.isDarkMode ? Colors.white12 : Colors.grey.shade300),
+                borderSide: BorderSide(
+                  color: widget.isDarkMode
+                      ? Colors.white12
+                      : Colors.grey.shade300,
+                ),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: Color(0xFF8938DF), width: 1.5),
+                borderSide: const BorderSide(
+                  color: Color(0xFF8938DF),
+                  width: 1.5,
+                ),
               ),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 12,
+              ),
             ),
           ),
         ],
@@ -1048,7 +1179,7 @@ void _handleNavigation(int index) {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Gender',
+            AppLanguage.tr('gender'),
             style: TextStyle(
               fontSize: 14,
               color: widget.isDarkMode ? Colors.white70 : Colors.grey.shade600,
@@ -1061,8 +1192,10 @@ void _handleNavigation(int index) {
               Expanded(
                 child: RadioListTile<String>(
                   title: Text(
-                    'Male',
-                    style: TextStyle(color: widget.isDarkMode ? Colors.white : Colors.black87),
+                    AppLanguage.tr('male'),
+                    style: TextStyle(
+                      color: widget.isDarkMode ? Colors.white : Colors.black87,
+                    ),
                   ),
                   value: 'male',
                   groupValue: _selectedGender,
@@ -1074,8 +1207,10 @@ void _handleNavigation(int index) {
               Expanded(
                 child: RadioListTile<String>(
                   title: Text(
-                    'Female',
-                    style: TextStyle(color: widget.isDarkMode ? Colors.white : Colors.black87),
+                    AppLanguage.tr('female'),
+                    style: TextStyle(
+                      color: widget.isDarkMode ? Colors.white : Colors.black87,
+                    ),
                   ),
                   value: 'female',
                   groupValue: _selectedGender,
@@ -1094,15 +1229,15 @@ void _handleNavigation(int index) {
   Widget _buildDateOfBirthField() {
     final dateDisplay = _selectedDateOfBirth != null
         ? '${_selectedDateOfBirth!.day.toString().padLeft(2, '0')}/${_selectedDateOfBirth!.month.toString().padLeft(2, '0')}/${_selectedDateOfBirth!.year}'
-        : 'Select date';
-    
+        : AppLanguage.tr('select_date');
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Date of Birth',
+            AppLanguage.tr('date_of_birth'),
             style: TextStyle(
               fontSize: 14,
               color: widget.isDarkMode ? Colors.white70 : Colors.grey.shade600,
@@ -1115,9 +1250,15 @@ void _handleNavigation(int index) {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                border: Border.all(color: widget.isDarkMode ? Colors.white12 : Colors.grey.shade300),
+                border: Border.all(
+                  color: widget.isDarkMode
+                      ? Colors.white12
+                      : Colors.grey.shade300,
+                ),
                 borderRadius: BorderRadius.circular(12),
-                color: widget.isDarkMode ? Colors.white.withOpacity(0.05) : Colors.grey.shade50,
+                color: widget.isDarkMode
+                    ? Colors.white.withOpacity(0.05)
+                    : Colors.grey.shade50,
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1126,15 +1267,19 @@ void _handleNavigation(int index) {
                     dateDisplay,
                     style: TextStyle(
                       fontSize: 16,
-                      color: _selectedDateOfBirth != null 
+                      color: _selectedDateOfBirth != null
                           ? (widget.isDarkMode ? Colors.white : Colors.black87)
-                          : (widget.isDarkMode ? Colors.white38 : Colors.grey.shade600),
+                          : (widget.isDarkMode
+                                ? Colors.white38
+                                : Colors.grey.shade600),
                     ),
                   ),
                   Icon(
                     Icons.calendar_today,
                     size: 20,
-                    color: widget.isDarkMode ? Colors.white54 : Colors.grey.shade600,
+                    color: widget.isDarkMode
+                        ? Colors.white54
+                        : Colors.grey.shade600,
                   ),
                 ],
               ),
@@ -1171,7 +1316,11 @@ void _handleNavigation(int index) {
                     color: const Color(0xFF8938DF).withOpacity(0.1),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.face_unlock_rounded, color: Color(0xFF8938DF), size: 24),
+                  child: const Icon(
+                    Icons.face_unlock_rounded,
+                    color: Color(0xFF8938DF),
+                    size: 24,
+                  ),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
@@ -1179,20 +1328,28 @@ void _handleNavigation(int index) {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Face Recognition',
+                        AppLanguage.tr('face_recognition'),
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          color: widget.isDarkMode ? Colors.white : Colors.black87,
+                          color: widget.isDarkMode
+                              ? Colors.white
+                              : Colors.black87,
                         ),
                       ),
                       Text(
-                        _hasRegisteredFace ? 'Already registered' : 'Not registered yet',
+                        _hasRegisteredFace
+                            ? AppLanguage.tr('already_registered')
+                            : AppLanguage.tr('not_registered_yet'),
                         style: TextStyle(
                           fontSize: 13,
-                          color: _hasRegisteredFace 
-                              ? (widget.isDarkMode ? Colors.greenAccent.shade200 : Colors.greenAccent.shade700) 
-                              : (widget.isDarkMode ? Colors.white70 : Colors.grey.shade500),
+                          color: _hasRegisteredFace
+                              ? (widget.isDarkMode
+                                    ? Colors.greenAccent.shade200
+                                    : Colors.greenAccent.shade700)
+                              : (widget.isDarkMode
+                                    ? Colors.white70
+                                    : Colors.grey.shade500),
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -1200,19 +1357,32 @@ void _handleNavigation(int index) {
                   ),
                 ),
                 _isCheckingFace
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                     : Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
-                          color: _hasRegisteredFace ? Colors.green.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
+                          color: _hasRegisteredFace
+                              ? Colors.green.withOpacity(0.1)
+                              : Colors.orange.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(
-                          _hasRegisteredFace ? 'Active' : 'Missing',
+                          _hasRegisteredFace
+                              ? AppLanguage.tr('active')
+                              : AppLanguage.tr('missing'),
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
-                            color: _hasRegisteredFace ? Colors.green : Colors.orange,
+                            color: _hasRegisteredFace
+                                ? Colors.green
+                                : Colors.orange,
                           ),
                         ),
                       ),
@@ -1225,11 +1395,15 @@ void _handleNavigation(int index) {
                 onPressed: _navigateToFaceRegistration,
                 style: OutlinedButton.styleFrom(
                   side: const BorderSide(color: Color(0xFF8938DF)),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
                 child: Text(
-                  _hasRegisteredFace ? 'Re-register Face' : 'Register Now',
+                  _hasRegisteredFace
+                      ? AppLanguage.tr('re_register_face')
+                      : AppLanguage.tr('register_now'),
                   style: const TextStyle(color: Color(0xFF8938DF)),
                 ),
               ),
@@ -1267,11 +1441,15 @@ void _handleNavigation(int index) {
                     color: const Color(0xFF8938DF).withOpacity(0.1),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.settings_suggest_rounded, color: Color(0xFF8938DF), size: 24),
+                  child: const Icon(
+                    Icons.settings_suggest_rounded,
+                    color: Color(0xFF8938DF),
+                    size: 24,
+                  ),
                 ),
                 const SizedBox(width: 16),
                 Text(
-                  'Attendance Settings',
+                  AppLanguage.tr('attendance_settings'),
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
@@ -1283,22 +1461,29 @@ void _handleNavigation(int index) {
             const SizedBox(height: 20),
             _buildModeOption(
               id: 'face',
-              title: 'Face Recognition',
-              subtitle: 'Scan face to take attendance',
+              title: AppLanguage.tr('face_recognition'),
+              subtitle: AppLanguage.tr('scan_face_subtitle'),
               icon: Icons.face_retouching_natural_rounded,
             ),
             const SizedBox(height: 12),
             _buildModeOption(
               id: 'rfid',
-              title: 'RFID Card',
-              subtitle: 'Tap RFID card on scanner',
+              title: AppLanguage.tr('rfid_card'),
+              subtitle: AppLanguage.tr('tap_rfid_subtitle'),
               icon: Icons.copy_all_rounded,
             ),
             const SizedBox(height: 12),
             _buildModeOption(
+              id: 'selfie',
+              title: AppLanguage.tr('selfie_attendance'),
+              subtitle: AppLanguage.tr('take_selfie_subtitle'),
+              icon: Icons.camera_alt_rounded,
+            ),
+            const SizedBox(height: 12),
+            _buildModeOption(
               id: 'fingerprint',
-              title: 'Fingerprint',
-              subtitle: 'Scan fingerprint (coming soon)',
+              title: AppLanguage.tr('fingerprint'),
+              subtitle: AppLanguage.tr('scan_fingerprint_subtitle'),
               icon: Icons.fingerprint_rounded,
               isSoon: true,
             ),
@@ -1316,21 +1501,27 @@ void _handleNavigation(int index) {
     bool isSoon = false,
   }) {
     final isSelected = _attendanceMode == id;
-    
+
     return InkWell(
-      onTap: isSoon ? null : () {
-        setState(() {
-          _attendanceMode = id;
-        });
-        _saveAttendanceMode(id);
-      },
+      onTap: isSoon
+          ? null
+          : () {
+              setState(() {
+                _attendanceMode = id;
+              });
+              _saveAttendanceMode(id);
+            },
       borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: widget.isDarkMode 
-              ? (isSelected ? const Color(0xFF8938DF).withOpacity(0.2) : Colors.white.withOpacity(0.08))
-              : (isSelected ? const Color(0xFF8938DF).withOpacity(0.08) : Colors.grey.shade50),
+          color: widget.isDarkMode
+              ? (isSelected
+                    ? const Color(0xFF8938DF).withOpacity(0.2)
+                    : Colors.white.withOpacity(0.08))
+              : (isSelected
+                    ? const Color(0xFF8938DF).withOpacity(0.08)
+                    : Colors.grey.shade50),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isSelected ? const Color(0xFF8938DF) : Colors.transparent,
@@ -1342,16 +1533,22 @@ void _handleNavigation(int index) {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: isSelected 
-                    ? (widget.isDarkMode ? const Color(0xFFB066FF) : const Color(0xFF8938DF)) 
-                    : (widget.isDarkMode ? Colors.white.withOpacity(0.12) : Colors.grey.shade200),
+                color: isSelected
+                    ? (widget.isDarkMode
+                          ? const Color(0xFFB066FF)
+                          : const Color(0xFF8938DF))
+                    : (widget.isDarkMode
+                          ? Colors.white.withOpacity(0.12)
+                          : Colors.grey.shade200),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(
-                icon, 
-                color: isSelected 
-                    ? Colors.white 
-                    : (widget.isDarkMode ? Colors.white.withOpacity(0.9) : Colors.grey.shade600),
+                icon,
+                color: isSelected
+                    ? Colors.white
+                    : (widget.isDarkMode
+                          ? Colors.white.withOpacity(0.9)
+                          : Colors.grey.shade600),
                 size: 20,
               ),
             ),
@@ -1367,13 +1564,18 @@ void _handleNavigation(int index) {
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
-                          color: widget.isDarkMode ? Colors.white : Colors.black87,
+                          color: widget.isDarkMode
+                              ? Colors.white
+                              : Colors.black87,
                         ),
                       ),
                       if (isSoon) ...[
                         const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.orange.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(4),
@@ -1394,7 +1596,167 @@ void _handleNavigation(int index) {
                     subtitle,
                     style: TextStyle(
                       fontSize: 12,
-                      color: widget.isDarkMode ? Colors.white70 : Colors.grey.shade600,
+                      color: widget.isDarkMode
+                          ? Colors.white70
+                          : Colors.grey.shade600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (isSelected)
+              const Icon(
+                Icons.check_circle_rounded,
+                color: Color(0xFF8938DF),
+                size: 20,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLanguageSettingsCard() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: widget.isDarkMode ? const Color(0xFF2D144B) : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF8938DF).withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.language_rounded,
+                    color: Color(0xFF8938DF),
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Text(
+                  AppLanguage.tr('language_settings'),
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: widget.isDarkMode ? Colors.white : Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            ValueListenableBuilder<String>(
+              valueListenable: LanguageHelper.languageNotifier,
+              builder: (context, currentLang, _) {
+                return Column(
+                  children: [
+                    _buildLanguageOption(
+                      code: LanguageHelper.indonesian,
+                      title: 'Bahasa Indonesia',
+                      subtitle: 'Indonesian',
+                      isSelected: currentLang == LanguageHelper.indonesian,
+                    ),
+                    const SizedBox(height: 12),
+                    _buildLanguageOption(
+                      code: LanguageHelper.english,
+                      title: 'English',
+                      subtitle: 'International',
+                      isSelected: currentLang == LanguageHelper.english,
+                    ),
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLanguageOption({
+    required String code,
+    required String title,
+    required String subtitle,
+    required bool isSelected,
+  }) {
+    return InkWell(
+      onTap: () async {
+        await AppLanguage.setLanguage(code);
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: widget.isDarkMode
+              ? (isSelected
+                    ? const Color(0xFF8938DF).withOpacity(0.2)
+                    : Colors.white.withOpacity(0.08))
+              : (isSelected
+                    ? const Color(0xFF8938DF).withOpacity(0.08)
+                    : Colors.grey.shade50),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? const Color(0xFF8938DF) : Colors.transparent,
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: widget.isDarkMode
+                    ? Colors.white.withOpacity(0.1)
+                    : Colors.grey.shade200,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Center(
+                  child: Text(
+                    code == 'id' ? '🇮🇩' : '🇺🇸',
+                    style: const TextStyle(fontSize: 20),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: widget.isDarkMode ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: widget.isDarkMode
+                          ? Colors.white70
+                          : Colors.grey.shade600,
                     ),
                   ),
                 ],

@@ -2,7 +2,7 @@ import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:intl/intl.dart';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../attendance/services/attendance_service.dart';
@@ -11,13 +11,14 @@ import '../services/member_performance_service.dart';
 import '../../attendance/services/face_recognition_tflite_service.dart';
 import '../../attendance/services/biometric_service.dart';
 import '../../services/supabase_storage_service.dart';
-import '../../helpers/timezone_helper.dart';
+
 import '../../helpers/rfid_mode_helper.dart';
 import '../widgets/petugas_bottom_nav.dart';
-import 'petugas_dashboard.dart';
+
 import 'petugas_records_page.dart';
 import 'petugas_profile_page.dart';
 import '../../attendance/screens/face_registration_page.dart';
+import '../../helpers/language_helper.dart';
 
 class PetugasMembersPage extends StatefulWidget {
   final bool isDarkMode;
@@ -49,7 +50,8 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
   final SupabaseClient _supabase = Supabase.instance.client;
   final AttendanceService _attendanceService = AttendanceService();
   final RoleService _roleService = RoleService();
-  final MemberPerformanceService _performanceService = MemberPerformanceService();
+  final MemberPerformanceService _performanceService =
+      MemberPerformanceService();
 
   bool _isInitialLoading = true;
   bool _isContentLoading = false;
@@ -65,12 +67,12 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
   List<Map<String, dynamic>> _membersPerformance = [];
   List<Map<String, dynamic>> _recentActivities = [];
   final TextEditingController _searchController = TextEditingController();
-  String _selectedDepartment = 'All';
-  List<String> _departments = ['All'];
+  String _selectedDepartment = 'all';
+  List<String> _departments = ['all'];
 
   // Enhancement features state
-  String _selectedTimePeriod = 'This Month';
-  String _selectedSortBy = 'Score';
+  String _selectedTimePeriod = 'today';
+  String _selectedSortBy = 'score';
   bool _isLoadingComparison = false;
 
   // Pagination
@@ -92,7 +94,6 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
     _loadDataOptimized();
     _setupBiometricRealtimeListener();
   }
-
 
   void _onScroll() {
     // Automatic pagination removed - replaced with Load More button
@@ -128,7 +129,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
     if (organizationId == null) return;
 
     setState(() => _isInitialLoading = true);
-    
+
     try {
       // Load attendance mode
       _attendanceMode = await RfidModeHelper.getAttendanceMode(organizationId);
@@ -136,16 +137,21 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
       await Future.wait([
         _loadOrganizationData(),
         _loadOrganizationMembersOptimized(page: 1, isInitial: true),
-        _loadPerformanceStatsOptimized(),
       ]);
+
+      // Use _applyFilters() to load performance data with the selected filter
+      await _applyFilters();
     } finally {
       if (mounted) setState(() => _isInitialLoading = false);
     }
-    
+
     _loadRecentActivitiesOptimized();
   }
 
-  Future<void> _loadOrganizationMembersOptimized({int page = 1, bool isInitial = false}) async {
+  Future<void> _loadOrganizationMembersOptimized({
+    int page = 1,
+    bool isInitial = false,
+  }) async {
     final organizationId = widget.memberData['organization_id'] as int?;
     if (organizationId == null) return;
 
@@ -157,7 +163,10 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
 
     try {
       final searchQuery = _searchController.text.trim();
-      
+      final departmentFilter = _selectedDepartment == 'all'
+          ? null
+          : _selectedDepartment;
+
       // Fetch members and total count in parallel if it's page 1 or total count is 0
       final futures = <Future>[
         _performanceService.getOrganizationMembers(
@@ -165,34 +174,36 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
           page: _currentPage,
           limit: _pageSize,
           searchQuery: searchQuery.isNotEmpty ? searchQuery : null,
-          departmentFilter: _selectedDepartment != 'All' ? _selectedDepartment : null,
-        )
+          departmentFilter: departmentFilter,
+        ),
       ];
 
       if (_currentPage == 1 || _totalMembers == 0) {
-        futures.add(_performanceService.getOrganizationMembersCount(
-          organizationId,
-          searchQuery: searchQuery.isNotEmpty ? searchQuery : null,
-          departmentFilter: _selectedDepartment != 'All' ? _selectedDepartment : null,
-        ));
+        futures.add(
+          _performanceService.getOrganizationMembersCount(
+            organizationId,
+            searchQuery: searchQuery.isNotEmpty ? searchQuery : null,
+            departmentFilter: departmentFilter,
+          ),
+        );
       }
 
       final results = await Future.wait(futures);
       final members = results[0] as List<Map<String, dynamic>>;
-      
+
       if (mounted) {
         setState(() {
           _organizationMembers = members;
-          
+
           if (results.length > 1) {
             _totalMembers = results[1] as int;
             _totalPages = (_totalMembers / _pageSize).ceil();
           }
-          
+
           _isPaginationDisabled = false;
-          
+
           if (_departments.length <= 1) {
-            final deptSet = <String>{'All'};
+            final deptSet = <String>{'all'};
             for (final member in members) {
               final dept = member['departments'] as Map<String, dynamic>?;
               if (dept != null && dept['name'] != null) {
@@ -201,7 +212,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
             }
             _departments = deptSet.toList();
           }
-          
+
           if (!isInitial) _isContentLoading = false;
         });
       }
@@ -209,53 +220,6 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
       if (mounted) {
         setState(() {
           if (!isInitial) _isContentLoading = false;
-        });
-      }
-    }
-  }
-
-
-  Future<void> _loadPerformanceStatsOptimized() async {
-    final organizationId = widget.memberData['organization_id'] as int?;
-    if (organizationId == null) return;
-
-    debugPrint('=== LOADING PERFORMANCE STATS (OPTIMIZED) ===');
-
-    setState(() => _isLoadingPerformance = true);
-
-    try {
-      // Get organization performance summary (uses global data, includes all members)
-      final summary = await _performanceService.getOrganizationPerformanceSummary(
-        organizationId,
-        organizationTimezone: _organizationTimezone,
-      );
-      
-      final now = DateTime.now();
-      final startOfMonth = DateTime(now.year, now.month, 1);
-      final endOfMonth = DateTime(now.year, now.month + 1, 0);
-
-      // Get top performers only (limit to 20 to get better top/bottom performers)
-      final performers = await _performanceService.getMembersPerformanceData(
-        organizationId,
-        startDate: startOfMonth,
-        endDate: endOfMonth,
-        limit: 20,
-      );
-
-        if (mounted) {
-          setState(() {
-            _memberPerformanceStats = summary;
-            _membersPerformance = performers;
-            _isLoadingPerformance = false;
-          });
-          
-          debugPrint('Performance stats loaded: ${_membersPerformance.length}');
-        }
-    } catch (e) {
-      debugPrint('!!! ERROR loading performance stats: $e');
-      if (mounted) {
-        setState(() {
-          _isLoadingPerformance = false;
         });
       }
     }
@@ -276,9 +240,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
         limit: 5, // Limit to 5 for faster loading
         organizationTimezone: _organizationTimezone,
       );
-      
+
       debugPrint('Recent activities loaded: ${activities.length}');
-      
+
       if (mounted) {
         setState(() {
           _recentActivities = activities;
@@ -330,16 +294,18 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
     setState(() => _isInitialLoading = true);
 
     try {
-      final members = await _performanceService.getOrganizationMembers(organizationId);
-      
+      final members = await _performanceService.getOrganizationMembers(
+        organizationId,
+      );
+
       debugPrint('Received ${members.length} members from service');
-      
+
       if (mounted) {
         setState(() {
           _organizationMembers = members;
-          
+
           // Extract departments for filtering
-          final deptSet = <String>{'All'};
+          final deptSet = <String>{'all'};
           for (final member in members) {
             final dept = member['departments'] as Map<String, dynamic>?;
             if (dept != null && dept['name'] != null) {
@@ -347,10 +313,10 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
             }
           }
           _departments = deptSet.toList();
-          
+
           _isInitialLoading = false;
         });
-        
+
         debugPrint('State updated - Members: ${_organizationMembers.length}');
         debugPrint('Departments: $_departments');
       }
@@ -360,50 +326,6 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
         setState(() {
           _isInitialLoading = false;
           _errorMessage = 'Failed to load members: $e';
-        });
-      }
-    }
-  }
-
-  Future<void> _loadPerformanceStats() async {
-    final organizationId = widget.memberData['organization_id'] as int?;
-    if (organizationId == null) return;
-
-    debugPrint('=== LOADING PERFORMANCE STATS ===');
-    debugPrint('Organization ID: $organizationId');
-
-    setState(() => _isLoadingPerformance = true);
-
-    try {
-      // Get organization performance summary
-      final summary = await _performanceService.getOrganizationPerformanceSummary(organizationId);
-      debugPrint('Performance summary received: $summary');
-      
-      final now = DateTime.now();
-      final startOfMonth = DateTime(now.year, now.month, 1);
-      final endOfMonth = DateTime(now.year, now.month + 1, 0);
-
-      // Get top and low performers
-      final performers = await _performanceService.getMembersPerformanceData(
-        organizationId,
-        startDate: startOfMonth,
-        endDate: endOfMonth,
-        limit: 50,
-      );
-      debugPrint('Performers data count: ${performers.length}');
-
-      if (mounted) {
-        setState(() {
-          _memberPerformanceStats = summary;
-          _membersPerformance = performers;
-          _isLoadingPerformance = false;
-        });
-      }
-    } catch (e) {
-      debugPrint('!!! ERROR loading performance stats: $e');
-      if (mounted) {
-        setState(() {
-          _isLoadingPerformance = false;
         });
       }
     }
@@ -420,10 +342,11 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
       final activities = await _performanceService.getRecentMemberActivities(
         organizationId,
         limit: 10,
+        organizationTimezone: _organizationTimezone,
       );
-      
+
       debugPrint('Recent activities loaded: ${activities.length}');
-      
+
       if (mounted) {
         setState(() {
           _recentActivities = activities;
@@ -439,23 +362,26 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
     if (organizationId == null) return;
 
     try {
-      final testResult = await _performanceService.testDatabaseConnection(organizationId);
+      final testResult = await _performanceService.testDatabaseConnection(
+        organizationId,
+      );
       debugPrint('=== DATABASE TEST RESULT ===');
       debugPrint('Test result: $testResult');
-      
+
       if (testResult['error'] != null) {
         debugPrint('Database connection error: ${testResult['error']}');
       } else {
         debugPrint('Database connection successful!');
         debugPrint('Organization exists: ${testResult['organization_exists']}');
         debugPrint('Active members: ${testResult['active_members_count']}');
-        debugPrint('Attendance records: ${testResult['attendance_records_count']}');
+        debugPrint(
+          'Attendance records: ${testResult['attendance_records_count']}',
+        );
       }
     } catch (e) {
       debugPrint('!!! ERROR in database test: $e');
     }
   }
-
 
   void _handleNavigation(int index) {
     if (index == _currentNavIndex) return;
@@ -478,7 +404,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
             transitionDuration: Duration.zero,
             reverseTransitionDuration: Duration.zero,
             pageBuilder: (context, _, __) => Container(
-              color: widget.isDarkMode ? const Color(0xFF1F0B38) : const Color(0xFFF8F9FA),
+              color: widget.isDarkMode
+                  ? const Color(0xFF1F0B38)
+                  : const Color(0xFFF8F9FA),
               child: PetugasRecordsPage(
                 organizationMemberId: widget.organizationMemberId,
                 memberData: widget.memberData,
@@ -500,7 +428,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
             transitionDuration: Duration.zero,
             reverseTransitionDuration: Duration.zero,
             pageBuilder: (context, _, __) => Container(
-              color: widget.isDarkMode ? const Color(0xFF1F0B38) : const Color(0xFFF8F9FA),
+              color: widget.isDarkMode
+                  ? const Color(0xFF1F0B38)
+                  : const Color(0xFFF8F9FA),
               child: PetugasProfilePage(
                 organizationMemberId: widget.organizationMemberId,
                 memberData: widget.memberData,
@@ -552,15 +482,16 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
     return '${(value * 100).toStringAsFixed(1)}%';
   }
 
-
-
-
   @override
   Widget build(BuildContext context) {
     if (_isInitialLoading) {
       return Scaffold(
-        backgroundColor: widget.isDarkMode ? const Color(0xFF1F0B38) : const Color(0xFFF5F5F5),
-        body: const Center(child: CircularProgressIndicator(color: primaryColor)),
+        backgroundColor: widget.isDarkMode
+            ? const Color(0xFF1F0B38)
+            : const Color(0xFFF5F5F5),
+        body: const Center(
+          child: CircularProgressIndicator(color: primaryColor),
+        ),
         bottomNavigationBar: PetugasBottomNav(
           currentIndex: _currentNavIndex,
           onNavigationTap: _handleNavigation,
@@ -571,12 +502,13 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
     }
 
     return Scaffold(
-      backgroundColor: widget.isDarkMode ? const Color(0xFF1F0B38) : const Color(0xFFF8F9FA),
+      backgroundColor: widget.isDarkMode
+          ? const Color(0xFF1F0B38)
+          : const Color(0xFFF8F9FA),
       body: NestedScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         headerSliverBuilder: (context, innerBoxIsScrolled) {
           return [
-
             SliverToBoxAdapter(
               child: Container(
                 height: MediaQuery.of(context).padding.top,
@@ -600,12 +532,14 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                     color: widget.isDarkMode ? const Color(0xFF1F0B38) : null,
                     border: Border(
                       bottom: BorderSide(
-                        color: widget.isDarkMode ? Colors.white.withOpacity(0.08) : Colors.grey.withOpacity(0.15),
+                        color: widget.isDarkMode
+                            ? Colors.white.withOpacity(0.08)
+                            : Colors.grey.withOpacity(0.15),
                         width: 1.0,
                       ),
                     ),
-                    gradient: widget.isDarkMode 
-                        ? null 
+                    gradient: widget.isDarkMode
+                        ? null
                         : const LinearGradient(
                             colors: [Color(0xFF8938DF), Color(0xFF4A1E79)],
                             begin: Alignment.topCenter,
@@ -614,16 +548,21 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                   ),
                   child: TabBar(
                     controller: _tabController,
-                    isScrollable: false, // Keep fixed tabs if they fit, using smaller font
+                    isScrollable:
+                        false, // Keep fixed tabs if they fit, using smaller font
                     labelColor: Colors.white,
                     unselectedLabelColor: Colors.white.withOpacity(0.6),
                     indicatorColor: Colors.white,
                     indicatorWeight: 3,
                     indicatorSize: TabBarIndicatorSize.label,
-                    indicatorPadding: const EdgeInsets.symmetric(horizontal: 12),
+                    indicatorPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                    ),
                     dividerColor: Colors.transparent,
                     dividerHeight: 0,
-                    labelPadding: const EdgeInsets.symmetric(horizontal: 4), // Reduce label padding
+                    labelPadding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                    ), // Reduce label padding
                     labelStyle: const TextStyle(
                       fontSize: 14, // Reduced from 18 to fit
                       fontWeight: FontWeight.bold,
@@ -632,10 +571,10 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                       fontSize: 14, // Reduced from 18 to fit
                       fontWeight: FontWeight.w500,
                     ),
-                    tabs: const [
-                      Tab(text: 'Overview'),
-                      Tab(text: 'Members'),
-                      Tab(text: 'Performance'),
+                    tabs: [
+                      Tab(text: AppLanguage.tr('Petugas.members.overview')),
+                      Tab(text: AppLanguage.tr('Petugas.members.members')),
+                      Tab(text: AppLanguage.tr('Petugas.members.performance')),
                     ],
                   ),
                 ),
@@ -644,7 +583,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
           ];
         },
         body: Container(
-          color: widget.isDarkMode ? const Color(0xFF1F0B38) : Colors.grey.shade50,
+          color: widget.isDarkMode
+              ? const Color(0xFF1F0B38)
+              : Colors.grey.shade50,
           child: TabBarView(
             controller: _tabController,
             children: [
@@ -663,7 +604,6 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
       ),
     );
   }
-
 
   Widget _buildDefaultLogo() {
     return Container(
@@ -686,48 +626,58 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-          // Stats Row: Total Members & Active Members
-          Row(
-            children: [
-              Expanded(
-                child: _buildStatCardModern(
-                  'TOTAL MEMBERS',
-                  '${_memberPerformanceStats['total_members'] ?? 0}',
-                  Icons.groups_rounded,
-                  widget.isDarkMode ? Colors.white.withOpacity(0.1) : const Color(0xFFF3E8FF),
-                  widget.isDarkMode ? Colors.white : const Color(0xFF9333EA),
+            // Stats Row: Total Members & Active Members
+            Row(
+              children: [
+                Expanded(
+                  child: _buildStatCardModern(
+                    AppLanguage.tr('Petugas.members.total_members'),
+                    '${_memberPerformanceStats['total_members'] ?? 0}',
+                    Icons.groups_rounded,
+                    widget.isDarkMode
+                        ? Colors.white.withOpacity(0.1)
+                        : const Color(0xFFF3E8FF),
+                    widget.isDarkMode ? Colors.white : const Color(0xFF9333EA),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _buildStatCardModern(
-                  'ACTIVE MEMBERS',
-                  '${_memberPerformanceStats['active_members'] ?? 0}',
-                  Icons.group_add_rounded,
-                  widget.isDarkMode ? Colors.white.withOpacity(0.1) : const Color(0xFFF3E8FF),
-                  widget.isDarkMode ? Colors.white : const Color(0xFF9333EA),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _buildStatCardModern(
+                    AppLanguage.tr('Petugas.members.active_members'),
+                    '${_memberPerformanceStats['active_members'] ?? 0}',
+                    Icons.group_add_rounded,
+                    widget.isDarkMode
+                        ? Colors.white.withOpacity(0.1)
+                        : const Color(0xFFF3E8FF),
+                    widget.isDarkMode ? Colors.white : const Color(0xFF9333EA),
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
+              ],
+            ),
+            const SizedBox(height: 20),
 
-          // Overall Attendance Card
-          _buildOverallAttendanceCard(),
-          const SizedBox(height: 32),
+            // Recent Activity Summary Card (simplified)
+            _buildRecentActivitySummaryCard(),
+            const SizedBox(height: 32),
 
-          // Recent Activity Section
-          _buildRecentActivityHeader(),
-          const SizedBox(height: 16),
-          _buildRecentActivityList(),
-          const SizedBox(height: 32),
+            // Recent Activity Section
+            _buildRecentActivityHeader(),
+            const SizedBox(height: 16),
+            _buildRecentActivityList(),
+            const SizedBox(height: 32),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildStatCardModern(String title, String value, IconData icon, Color bgColor, Color iconColor) {
+  Widget _buildStatCardModern(
+    String title,
+    String value,
+    IconData icon,
+    Color bgColor,
+    Color iconColor,
+  ) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -750,10 +700,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
         children: [
           Container(
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: bgColor,
-              shape: BoxShape.circle,
-            ),
+            decoration: BoxDecoration(color: bgColor, shape: BoxShape.circle),
             child: Icon(icon, color: iconColor, size: 24),
           ),
           const SizedBox(height: 16),
@@ -762,7 +709,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.bold,
-              color: widget.isDarkMode ? Colors.white54 : const Color(0xFF4B5563),
+              color: widget.isDarkMode
+                  ? Colors.white54
+                  : const Color(0xFF4B5563),
               letterSpacing: 0.5,
             ),
           ),
@@ -780,9 +729,10 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
     );
   }
 
-  Widget _buildOverallAttendanceCard() {
-    final attendanceRate = _memberPerformanceStats['avg_attendance_rate'] ?? 0.0;
-    final percentage = (attendanceRate * 100).toStringAsFixed(1);
+  Widget _buildRecentActivitySummaryCard() {
+    final punctualityRate =
+        _memberPerformanceStats['avg_punctuality_rate'] ?? 0.0;
+    final percentage = (punctualityRate * 100).toStringAsFixed(1);
 
     return Container(
       width: double.infinity,
@@ -808,9 +758,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'OVERALL ATTENDANCE',
-                style: TextStyle(
+              Text(
+                AppLanguage.tr('Petugas.members.punctuality_rate'),
+                style: const TextStyle(
                   color: Colors.white70,
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
@@ -818,7 +768,10 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(20),
@@ -835,9 +788,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                       ),
                     ),
                     const SizedBox(width: 8),
-                    const Text(
-                      'LIVE',
-                      style: TextStyle(
+                    Text(
+                      AppLanguage.tr('Petugas.members.live'),
+                      style: const TextStyle(
                         color: Colors.white,
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
@@ -857,7 +810,16 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 8),
+          Text(
+            AppLanguage.tr('Petugas.members.on_time_attendance'),
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.8),
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 16),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -867,7 +829,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                 width: 120,
                 child: Stack(
                   children: List.generate(
-                    _organizationMembers.length > 3 ? 4 : _organizationMembers.length,
+                    _organizationMembers.length > 3
+                        ? 4
+                        : _organizationMembers.length,
                     (index) {
                       if (index == 3 && _organizationMembers.length > 3) {
                         return Positioned(
@@ -878,7 +842,10 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                             decoration: BoxDecoration(
                               color: const Color(0xFFE9D5FF),
                               shape: BoxShape.circle,
-                              border: Border.all(color: const Color(0xFF6B21A8), width: 2),
+                              border: Border.all(
+                                color: const Color(0xFF6B21A8),
+                                width: 2,
+                              ),
                             ),
                             child: Center(
                               child: Text(
@@ -893,10 +860,10 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                           ),
                         );
                       }
-                      
+
                       final member = _organizationMembers[index];
                       final photoUrl = _getMemberPhotoUrl(member);
-                      
+
                       return Positioned(
                         left: index * 26.0,
                         child: Container(
@@ -907,11 +874,15 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                           child: CircleAvatar(
                             radius: 17,
                             backgroundColor: Colors.grey.shade200,
-                            backgroundImage: photoUrl != null 
-                                ? CachedNetworkImageProvider(photoUrl) 
+                            backgroundImage: photoUrl != null
+                                ? CachedNetworkImageProvider(photoUrl)
                                 : null,
-                            child: photoUrl == null 
-                                ? const Icon(Icons.person, size: 20, color: Colors.grey) 
+                            child: photoUrl == null
+                                ? const Icon(
+                                    Icons.person,
+                                    size: 20,
+                                    color: Colors.grey,
+                                  )
                                 : null,
                           ),
                         ),
@@ -932,11 +903,14 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
                 ),
-                child: const Text(
-                  'Manage',
-                  style: TextStyle(
+                child: Text(
+                  AppLanguage.tr('Petugas.members.manage'),
+                  style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 14,
                   ),
@@ -954,7 +928,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(
-          'Recent Activity',
+          AppLanguage.tr('Petugas.members.recent_activity'),
           style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.bold,
@@ -965,9 +939,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
           onTap: () {
             // Navigate to full records or something
           },
-          child: const Text(
-            'View All',
-            style: TextStyle(
+          child: Text(
+            AppLanguage.tr('Petugas.members.view_all'),
+            style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
               color: Color(0xFF6B21A8),
@@ -994,7 +968,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
         decoration: BoxDecoration(
           color: widget.isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: widget.isDarkMode ? Colors.white10 : Colors.grey.shade100),
+          border: Border.all(
+            color: widget.isDarkMode ? Colors.white10 : Colors.grey.shade100,
+          ),
         ),
         child: Center(
           child: Column(
@@ -1002,13 +978,17 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
               Icon(
                 Icons.history,
                 size: 48,
-                color: widget.isDarkMode ? Colors.white24 : Colors.grey.shade300,
+                color: widget.isDarkMode
+                    ? Colors.white24
+                    : Colors.grey.shade300,
               ),
               const SizedBox(height: 16),
               Text(
-                'No activities today',
+                AppLanguage.tr('Petugas.members.no_activities_today'),
                 style: TextStyle(
-                  color: widget.isDarkMode ? Colors.white54 : Colors.grey.shade500,
+                  color: widget.isDarkMode
+                      ? Colors.white54
+                      : Colors.grey.shade500,
                   fontSize: 16,
                 ),
               ),
@@ -1028,8 +1008,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
         final eventType = activity['event_type'] as String? ?? 'Unknown';
         final timeAgo = activity['time_ago'] as String? ?? 'Just now';
         final method = activity['method'] as String? ?? '';
-        final memberInfo = activity['member_info'] as Map<String, dynamic>? ?? {};
-        
+        final memberInfo =
+            activity['member_info'] as Map<String, dynamic>? ?? {};
+
         return Container(
           margin: const EdgeInsets.only(bottom: 12),
           padding: const EdgeInsets.all(16),
@@ -1049,13 +1030,18 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
               Container(
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFFE9D5FF), width: 1.5),
+                  border: Border.all(
+                    color: const Color(0xFFE9D5FF),
+                    width: 1.5,
+                  ),
                 ),
                 child: CircleAvatar(
                   radius: 28,
                   backgroundColor: Colors.grey.shade100,
                   backgroundImage: _getMemberPhotoUrl(memberInfo) != null
-                      ? CachedNetworkImageProvider(_getMemberPhotoUrl(memberInfo)!)
+                      ? CachedNetworkImageProvider(
+                          _getMemberPhotoUrl(memberInfo)!,
+                        )
                       : null,
                   child: _getMemberPhotoUrl(memberInfo) == null
                       ? const Icon(Icons.person, color: Colors.grey, size: 28)
@@ -1072,7 +1058,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
-                        color: widget.isDarkMode ? Colors.white : Colors.black87,
+                        color: widget.isDarkMode
+                            ? Colors.white
+                            : Colors.black87,
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -1085,7 +1073,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                             'via ${method.replaceAll('_', ' ')}',
                             style: TextStyle(
                               fontSize: 12,
-                              color: widget.isDarkMode ? Colors.white54 : Colors.grey.shade500,
+                              color: widget.isDarkMode
+                                  ? Colors.white54
+                                  : Colors.grey.shade500,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -1113,7 +1103,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
   Widget _buildActivityBadgeModern(String eventType) {
     Color color;
     String label;
-    
+
     switch (eventType.toLowerCase()) {
       case 'check_in':
         color = const Color(0xFF10B981);
@@ -1135,7 +1125,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
         color = Colors.grey;
         label = eventType.replaceAll('_', ' ');
     }
-    
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
@@ -1156,7 +1146,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
   Widget _buildActivityBadge(String eventType) {
     Color color;
     String label;
-    
+
     switch (eventType.toLowerCase()) {
       case 'check_in':
         color = const Color(0xFF10B981);
@@ -1178,7 +1168,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
         color = Colors.grey;
         label = eventType.replaceAll('_', ' ');
     }
-    
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
@@ -1196,17 +1186,13 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
     );
   }
 
-
-
   Widget _buildMembersTab() {
     return Container(
       color: widget.isDarkMode ? const Color(0xFF1F0B38) : Colors.grey.shade50,
       child: Column(
         children: [
           _buildSummaryCard(),
-          Expanded(
-            child: _buildMembersList(),
-          ),
+          Expanded(child: _buildMembersList()),
         ],
       ),
     );
@@ -1238,25 +1224,35 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
               height: 40,
               padding: const EdgeInsets.symmetric(horizontal: 10),
               decoration: BoxDecoration(
-                color: widget.isDarkMode ? Colors.white.withOpacity(0.05) : Colors.grey.shade100,
+                color: widget.isDarkMode
+                    ? Colors.white.withOpacity(0.05)
+                    : Colors.grey.shade100,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.search, size: 16, color: widget.isDarkMode ? Colors.white54 : Colors.grey),
+                  Icon(
+                    Icons.search,
+                    size: 16,
+                    color: widget.isDarkMode ? Colors.white54 : Colors.grey,
+                  ),
                   const SizedBox(width: 6),
                   Expanded(
                     child: TextField(
                       controller: _searchController,
                       style: TextStyle(
                         fontSize: 12,
-                        color: widget.isDarkMode ? Colors.white : Colors.black87,
+                        color: widget.isDarkMode
+                            ? Colors.white
+                            : Colors.black87,
                       ),
                       decoration: InputDecoration(
-                        hintText: 'Search...',
+                        hintText: AppLanguage.tr('Petugas.members.search'),
                         hintStyle: TextStyle(
                           fontSize: 12,
-                          color: widget.isDarkMode ? Colors.white38 : Colors.grey,
+                          color: widget.isDarkMode
+                              ? Colors.white38
+                              : Colors.grey,
                         ),
                         border: InputBorder.none,
                         isDense: true,
@@ -1280,29 +1276,48 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
             height: 40,
             padding: const EdgeInsets.symmetric(horizontal: 4),
             decoration: BoxDecoration(
-              color: widget.isDarkMode ? Colors.white.withOpacity(0.05) : Colors.grey.shade100,
+              color: widget.isDarkMode
+                  ? Colors.white.withOpacity(0.05)
+                  : Colors.grey.shade100,
               borderRadius: BorderRadius.circular(12),
             ),
             child: DropdownButtonHideUnderline(
               child: DropdownButton<String>(
                 value: _selectedDepartment,
                 isDense: true,
-                icon: Icon(Icons.filter_list, size: 16, color: widget.isDarkMode ? Colors.white70 : Colors.grey),
-                style: TextStyle(fontSize: 12, color: widget.isDarkMode ? Colors.white : Colors.black87),
-                dropdownColor: widget.isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
-                items: _departments.map((dept) {
+                icon: Icon(
+                  Icons.filter_list,
+                  size: 16,
+                  color: widget.isDarkMode ? Colors.white70 : Colors.grey,
+                ),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: widget.isDarkMode ? Colors.white : Colors.black87,
+                ),
+                dropdownColor: widget.isDarkMode
+                    ? const Color(0xFF2D1B4E)
+                    : Colors.white,
+                items: _departments.map<DropdownMenuItem<String>>((
+                  String value,
+                ) {
                   return DropdownMenuItem(
-                    value: dept,
+                    value: value,
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 60),
-                      child: Text(dept, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
+                      child: Text(
+                        value == 'all' ? AppLanguage.tr('all') : value,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 11),
+                      ),
                     ),
                   );
                 }).toList(),
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() => _selectedDepartment = value);
-                    _loadOrganizationMembersOptimized();
+                onChanged: (String? newValue) {
+                  if (newValue != null) {
+                    setState(() {
+                      _selectedDepartment = newValue;
+                    });
+                    _loadOrganizationMembersOptimized(isInitial: false);
                   }
                 },
               ),
@@ -1313,21 +1328,24 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
     );
   }
 
-
   Widget _buildMembersList() {
     final filteredMembers = _organizationMembers;
-    final isFiltering = _searchController.text.isNotEmpty || _selectedDepartment != 'All';
-    
+    final isFiltering =
+        _searchController.text.isNotEmpty || _selectedDepartment != 'all';
+
     if (_isContentLoading) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(40.0),
+          padding: const EdgeInsets.all(40.0),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CircularProgressIndicator(strokeWidth: 3),
-              SizedBox(height: 16),
-              Text('Searching...', style: TextStyle(color: Colors.grey)),
+              const CircularProgressIndicator(strokeWidth: 3),
+              const SizedBox(height: 16),
+              Text(
+                AppLanguage.tr('Petugas.members.searching'),
+                style: const TextStyle(color: Colors.grey),
+              ),
             ],
           ),
         ),
@@ -1365,8 +1383,14 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
             Icon(Icons.people_outline, size: 64, color: Colors.grey.shade300),
             const SizedBox(height: 16),
             Text(
-              isFiltering ? 'No members found' : 'No members available',
-              style: TextStyle(fontSize: 16, color: Colors.grey.shade600, fontWeight: FontWeight.w500),
+              isFiltering
+                  ? AppLanguage.tr('Petugas.members.no_members_found')
+                  : AppLanguage.tr('Petugas.members.no_members_available'),
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.grey.shade600,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ],
         ),
@@ -1375,74 +1399,61 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
   }
 
   Widget _buildPaginationControls() {
-    if (_totalMembers == 0 && !_isContentLoading) return const SizedBox.shrink();
-    
+    if (_totalMembers == 0 && !_isContentLoading)
+      return const SizedBox.shrink();
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       decoration: BoxDecoration(
         color: widget.isDarkMode ? const Color(0xFF1F0B38) : Colors.white,
-        border: Border(top: BorderSide(color: widget.isDarkMode ? Colors.white10 : Colors.grey.shade100)),
+        border: Border(
+          top: BorderSide(
+            color: widget.isDarkMode ? Colors.white10 : Colors.grey.shade100,
+          ),
+        ),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           // Previous Button
-          SizedBox(
-            width: 100,
-            child: OutlinedButton(
-              onPressed: _currentPage > 1 ? () => _loadOrganizationMembersOptimized(page: _currentPage - 1) : null,
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                side: BorderSide(color: _currentPage > 1 
-                    ? (widget.isDarkMode ? const Color(0xFF8938DF) : primaryColor) 
-                    : (widget.isDarkMode ? Colors.white12 : Colors.grey.shade200)),
-                backgroundColor: _currentPage > 1 && widget.isDarkMode ? const Color(0xFF8938DF).withOpacity(0.05) : null,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.chevron_left, size: 18, color: _currentPage > 1 
-                      ? (widget.isDarkMode ? const Color(0xFFA855F7) : primaryColor) 
-                      : Colors.grey),
-                  const SizedBox(width: 4),
-                  Text('Prev', style: TextStyle(
-                    color: _currentPage > 1 
-                        ? (widget.isDarkMode ? const Color(0xFFA855F7) : primaryColor) 
-                        : Colors.grey, 
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                  )),
-                ],
-              ),
-            ),
+          _buildPaginationButton(
+            label: AppLanguage.tr('prev'),
+            icon: Icons.chevron_left,
+            onPressed: _currentPage > 1
+                ? () =>
+                      _loadOrganizationMembersOptimized(page: _currentPage - 1)
+                : null,
           ),
-          
+
           // Page Info (Centered)
           Expanded(
             child: InkWell(
               onTap: _showJumpToPageDialog,
               borderRadius: BorderRadius.circular(8),
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
+                padding: const EdgeInsets.symmetric(vertical: 2),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'Page $_currentPage of $_totalPages',
+                      '${AppLanguage.tr('page')} $_currentPage ${AppLanguage.tr('of')} $_totalPages',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        color: widget.isDarkMode ? const Color(0xFFD8B4FE) : Colors.black87,
-                        fontSize: 14,
+                        color: widget.isDarkMode
+                            ? const Color(0xFFD8B4FE)
+                            : Colors.black87,
+                        fontSize: 12,
                       ),
                     ),
                     Text(
-                      '$_totalMembers Total Members',
+                      '$_totalMembers ${AppLanguage.tr('Petugas.members.total_members')}',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        fontSize: 10,
-                        color: widget.isDarkMode ? Colors.white38 : Colors.grey.shade500,
+                        fontSize: 9,
+                        color: widget.isDarkMode
+                            ? Colors.white38
+                            : Colors.grey.shade500,
                       ),
                     ),
                   ],
@@ -1450,51 +1461,99 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
               ),
             ),
           ),
-          
+
           // Next Button
-          SizedBox(
-            width: 100,
-            child: OutlinedButton(
-              onPressed: _currentPage < _totalPages ? () => _loadOrganizationMembersOptimized(page: _currentPage + 1) : null,
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                side: BorderSide(color: _currentPage < _totalPages 
-                    ? (widget.isDarkMode ? const Color(0xFF8938DF) : primaryColor) 
-                    : (widget.isDarkMode ? Colors.white12 : Colors.grey.shade200)),
-                backgroundColor: _currentPage < _totalPages && widget.isDarkMode ? const Color(0xFF8938DF).withOpacity(0.05) : null,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('Next', style: TextStyle(
-                    color: _currentPage < _totalPages 
-                        ? (widget.isDarkMode ? const Color(0xFFA855F7) : primaryColor) 
-                        : Colors.grey, 
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                  )),
-                  const SizedBox(width: 4),
-                  Icon(Icons.chevron_right, size: 18, color: _currentPage < _totalPages 
-                      ? (widget.isDarkMode ? const Color(0xFFA855F7) : primaryColor) 
-                      : Colors.grey),
-                ],
-              ),
-            ),
+          _buildPaginationButton(
+            label: AppLanguage.tr('next'),
+            icon: Icons.chevron_right,
+            onPressed: _currentPage < _totalPages
+                ? () =>
+                      _loadOrganizationMembersOptimized(page: _currentPage + 1)
+                : null,
+            isRightIcon: true,
           ),
         ],
       ),
     );
   }
 
+  Widget _buildPaginationButton({
+    required String label,
+    required IconData icon,
+    required VoidCallback? onPressed,
+    bool isRightIcon = false,
+  }) {
+    return SizedBox(
+      width: 90,
+      child: OutlinedButton(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          side: BorderSide(
+            color: onPressed != null
+                ? (widget.isDarkMode ? const Color(0xFF8938DF) : primaryColor)
+                : (widget.isDarkMode ? Colors.white12 : Colors.grey.shade200),
+          ),
+          backgroundColor: onPressed != null && widget.isDarkMode
+              ? const Color(0xFF8938DF).withOpacity(0.05)
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!isRightIcon)
+              Icon(
+                icon,
+                size: 18,
+                color: onPressed != null
+                    ? (widget.isDarkMode
+                          ? const Color(0xFFA855F7)
+                          : primaryColor)
+                    : Colors.grey,
+              ),
+            if (!isRightIcon) const SizedBox(width: 2),
+            Text(
+              label,
+              style: TextStyle(
+                color: onPressed != null
+                    ? (widget.isDarkMode
+                          ? const Color(0xFFA855F7)
+                          : primaryColor)
+                    : Colors.grey,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            if (isRightIcon) const SizedBox(width: 2),
+            if (isRightIcon)
+              Icon(
+                icon,
+                size: 18,
+                color: onPressed != null
+                    ? (widget.isDarkMode
+                          ? const Color(0xFFA855F7)
+                          : primaryColor)
+                    : Colors.grey,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showJumpToPageDialog() {
-    final controller = TextEditingController();
+    final TextEditingController pageController = TextEditingController();
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: widget.isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
+        backgroundColor: widget.isDarkMode
+            ? const Color(0xFF2D1B4E)
+            : Colors.white,
         title: Text(
-          'Go to Page',
+          AppLanguage.tr('go_to_page'),
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.bold,
@@ -1506,27 +1565,49 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Enter page number (1-$_totalPages):',
-              style: TextStyle(color: widget.isDarkMode ? Colors.white54 : Colors.grey.shade600, fontSize: 14),
+              AppLanguage.tr(
+                'Petugas.members.enter_page_number',
+              ).replaceFirst('{range}', '1 - $_totalPages'),
+              style: TextStyle(
+                color: widget.isDarkMode
+                    ? Colors.white54
+                    : Colors.grey.shade600,
+                fontSize: 14,
+              ),
             ),
             const SizedBox(height: 12),
             TextField(
-              controller: controller,
+              controller: pageController,
               keyboardType: TextInputType.number,
               autofocus: true,
-              style: TextStyle(color: widget.isDarkMode ? Colors.white : Colors.black87),
+              style: TextStyle(
+                color: widget.isDarkMode ? Colors.white : Colors.black87,
+              ),
               decoration: InputDecoration(
-                hintText: 'e.g. 49',
-                hintStyle: TextStyle(color: widget.isDarkMode ? Colors.white30 : Colors.grey),
+                hintText: AppLanguage.tr('Petugas.members.example_page'),
+                hintStyle: TextStyle(
+                  color: widget.isDarkMode ? Colors.white30 : Colors.grey,
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: widget.isDarkMode ? Colors.white10 : Colors.grey.shade300),
+                  borderSide: BorderSide(
+                    color: widget.isDarkMode
+                        ? Colors.white10
+                        : Colors.grey.shade300,
+                  ),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: widget.isDarkMode ? Colors.white10 : Colors.grey.shade300),
+                  borderSide: BorderSide(
+                    color: widget.isDarkMode
+                        ? Colors.white10
+                        : Colors.grey.shade300,
+                  ),
                 ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
               ),
             ),
           ],
@@ -1534,48 +1615,58 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: Text(AppLanguage.tr('cancel')),
           ),
           ElevatedButton(
             onPressed: () {
-              final page = int.tryParse(controller.text);
+              final page = int.tryParse(pageController.text);
               if (page != null && page >= 1 && page <= _totalPages) {
                 Navigator.pop(context);
                 _loadOrganizationMembersOptimized(page: page);
               } else {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Please enter a valid page between 1 and $_totalPages')),
+                  SnackBar(
+                    content: Text(
+                      AppLanguage.tr(
+                        'Petugas.members.invalid_page_number',
+                      ).replaceFirst('{totalPages}', '$_totalPages'),
+                    ),
+                  ),
                 );
               }
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: primaryColor,
               foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
-            child: const Text('Go'),
+            child: Text(AppLanguage.tr('go')),
           ),
         ],
       ),
     );
   }
 
-
   Widget _buildMemberCard(Map<String, dynamic> member) {
     final department = member['departments'] as Map<String, dynamic>?;
     final position = member['positions'] as Map<String, dynamic>?;
-    
-    String roleName = 'Member';
+
+    String roleName = AppLanguage.tr('Petugas.members.member');
     final posTitle = position?['title'] ?? position?['name'];
     if (department != null && posTitle != null) {
       roleName = '${department['name']} • $posTitle';
     } else {
-      roleName = posTitle ?? department?['name'] ?? 'Member';
+      roleName =
+          posTitle ??
+          department?['name'] ??
+          AppLanguage.tr('Petugas.members.member');
     }
-    
+
     final photoUrl = _getMemberPhotoUrl(member);
     final accentColor = const Color(0xFF8938DF);
-    final softAccent = accentColor.withValues(alpha: 0.1);
+    final softAccent = accentColor.withOpacity(0.1);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8), // Reduced margin
@@ -1608,7 +1699,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                   shape: BoxShape.circle,
                   color: Colors.grey.shade100,
                   border: Border.all(
-                    color: widget.isDarkMode ? Colors.white10 : Colors.grey.shade50,
+                    color: widget.isDarkMode
+                        ? Colors.white10
+                        : Colors.grey.shade50,
                     width: 1.5,
                   ),
                 ),
@@ -1617,7 +1710,8 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                       ? CachedNetworkImage(
                           imageUrl: photoUrl,
                           fit: BoxFit.cover,
-                          placeholder: (context, url) => Container(color: Colors.grey.shade50),
+                          placeholder: (context, url) =>
+                              Container(color: Colors.grey.shade50),
                           errorWidget: (context, url, error) => Icon(
                             Icons.person,
                             color: Colors.grey.shade400,
@@ -1643,7 +1737,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                       style: TextStyle(
                         fontSize: 16, // Reduced from 18
                         fontWeight: FontWeight.bold,
-                        color: widget.isDarkMode ? Colors.white : Colors.black87,
+                        color: widget.isDarkMode
+                            ? Colors.white
+                            : Colors.black87,
                         letterSpacing: -0.3,
                       ),
                       overflow: TextOverflow.ellipsis,
@@ -1653,7 +1749,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                       roleName,
                       style: TextStyle(
                         fontSize: 13, // Reduced from 14
-                        color: widget.isDarkMode ? Colors.white54 : const Color(0xFF8938DF).withOpacity(0.7),
+                        color: widget.isDarkMode
+                            ? Colors.white54
+                            : const Color(0xFF8938DF).withOpacity(0.7),
                         fontWeight: FontWeight.w500,
                       ),
                       overflow: TextOverflow.ellipsis,
@@ -1719,25 +1817,36 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
   void _showMemberDetail(Map<String, dynamic> member) {
     final department = member['departments'] as Map<String, dynamic>?;
     final position = member['positions'] as Map<String, dynamic>?;
-    
+
     // Determine Face Data Status
     bool hasFaceData = false;
     final bioData = member['biometric_data'];
     if (bioData is List) {
-      hasFaceData = bioData.any((b) => (b['biometric_type'] == 'face' || b['biometric_type'] == 'face_recognition') && b['is_active'] == true);
+      hasFaceData = bioData.any(
+        (b) =>
+            (b['biometric_type'] == 'face' ||
+                b['biometric_type'] == 'face_recognition') &&
+            b['is_active'] == true,
+      );
     } else if (bioData is Map) {
       // Handle single object case if standard supabase behavior differs
-      hasFaceData = (bioData['biometric_type'] == 'face' || bioData['biometric_type'] == 'face_recognition') && bioData['is_active'] == true;
+      hasFaceData =
+          (bioData['biometric_type'] == 'face' ||
+              bioData['biometric_type'] == 'face_recognition') &&
+          bioData['is_active'] == true;
     }
 
-    String deptName = 'No Department';
+    String deptName = AppLanguage.tr('Petugas.members.no_department');
     final posTitle = position?['title'] ?? position?['name'];
     if (department != null && posTitle != null) {
-      deptName = department['name']; // Just Dept name as per image "Department Creative Team"
+      deptName =
+          department['name']; // Just Dept name as per image "Department Creative Team"
     } else {
-      deptName = department?['name'] ?? 'No Department';
+      deptName =
+          department?['name'] ??
+          AppLanguage.tr('Petugas.members.no_department');
     }
-    
+
     // Employee ID
     final empId = member['employee_id'] ?? '#----';
 
@@ -1751,7 +1860,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
           color: const Color(0xFF5B259F), // Deep Purple Background
           borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
           boxShadow: [
-             BoxShadow(
+            BoxShadow(
               color: Colors.black.withOpacity(0.4),
               blurRadius: 20,
               offset: const Offset(0, -5),
@@ -1772,112 +1881,126 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
               ),
             ),
             const SizedBox(height: 32),
-            
+
             // Profile & Info Row
             Row(
               children: [
-                 // Profile Photo with Green Dot
-                 Stack(
-                   children: [
-                     Container(
-                       padding: const EdgeInsets.all(3),
-                       decoration: const BoxDecoration(
-                         color: Colors.white,
-                         shape: BoxShape.circle,
-                       ),
-                       child: CircleAvatar(
-                          radius: 45,
-                          backgroundColor: Colors.grey.shade200,
-                          backgroundImage: _getMemberPhotoUrl(member) != null
-                              ? CachedNetworkImageProvider(_getMemberPhotoUrl(member)!)
-                              : null,
-                          child: _getMemberPhotoUrl(member) == null
-                              ? const Icon(Icons.person, size: 45, color: Colors.grey)
-                              : null,
+                // Profile Photo with Green Dot
+                Stack(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                      ),
+                      child: CircleAvatar(
+                        radius: 45,
+                        backgroundColor: Colors.grey.shade200,
+                        backgroundImage: _getMemberPhotoUrl(member) != null
+                            ? CachedNetworkImageProvider(
+                                _getMemberPhotoUrl(member)!,
+                              )
+                            : null,
+                        child: _getMemberPhotoUrl(member) == null
+                            ? const Icon(
+                                Icons.person,
+                                size: 45,
+                                color: Colors.grey,
+                              )
+                            : null,
+                      ),
+                    ),
+                    Positioned(
+                      bottom: 5,
+                      right: 5,
+                      child: Container(
+                        width: 20,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981), // Green active
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
                         ),
-                     ),
-                     Positioned(
-                       bottom: 5,
-                       right: 5,
-                       child: Container(
-                         width: 20,
-                         height: 20,
-                         decoration: BoxDecoration(
-                           color: const Color(0xFF10B981), // Green active
-                           shape: BoxShape.circle,
-                           border: Border.all(color: Colors.white, width: 2),
-                         ),
-                       ),
-                     ),
-                   ],
-                 ),
-                 const SizedBox(width: 20),
-                 
-                 // Text Info
-                 Expanded(
-                   child: Column(
-                     crossAxisAlignment: CrossAxisAlignment.start,
-                     children: [
-                       Text(
-                          _getMemberName(member),
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(width: 20),
+
+                // Text Info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _getMemberName(member),
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+
+                      // Department
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.business,
+                            color: Colors.white70,
+                            size: 16,
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        
-                        // Department
-                        Row(
-                          children: [
-                            const Icon(Icons.business, color: Colors.white70, size: 16),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Department $deptName',
-                                style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 14,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        
-                        // Employee ID
-                        Row(
-                          children: [
-                            const Icon(Icons.badge_outlined, color: Colors.white70, size: 16),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Employee ID',
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '${AppLanguage.tr('Petugas.members.department')} $deptName',
                               style: const TextStyle(
                                 color: Colors.white70,
                                 fontSize: 14,
                               ),
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            const Spacer(),
-                            Text(
-                              '$empId',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                              ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+
+                      // Employee ID
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.badge_outlined,
+                            color: Colors.white70,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            AppLanguage.tr('Petugas.members.employee_id'),
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 14,
                             ),
-                          ],
-                        )
-                     ],
-                   ),
-                 ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            '$empId',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
-            
+
             const SizedBox(height: 32),
-            
+
             // Conditional Card
             if (!hasFaceData) ...[
               // WARNING CARD (Yellow/Cream)
@@ -1890,24 +2013,32 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.info_outline, color: Color(0xFFF59E0B), size: 28),
+                    const Icon(
+                      Icons.info_outline,
+                      color: Color(0xFFF59E0B),
+                      size: 28,
+                    ),
                     const SizedBox(width: 16),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
+                        children: [
                           Text(
-                            'Your face has not been registered yet.',
-                            style: TextStyle(
+                            AppLanguage.tr(
+                              'Petugas.members.face_not_registered_yet',
+                            ),
+                            style: const TextStyle(
                               color: Color(0xFF92400E), // Brownish text
                               fontSize: 16,
                               height: 1.4,
                             ),
                           ),
-                          SizedBox(height: 4),
+                          const SizedBox(height: 4),
                           Text(
-                            'Please register your face for seamless attendance tracking.',
-                            style: TextStyle(
+                            AppLanguage.tr(
+                              'Petugas.members.register_face_for_attendance',
+                            ),
+                            style: const TextStyle(
                               color: Color(0xFF92400E),
                               fontSize: 14,
                               height: 1.4,
@@ -1926,7 +2057,10 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                   // Punctuality Card
                   Expanded(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 24,
+                        horizontal: 16,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(24),
@@ -1938,13 +2072,23 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              border: Border.all(color: const Color(0xFF8B5CF6), width: 2),
+                              border: Border.all(
+                                color: const Color(0xFF8B5CF6),
+                                width: 2,
+                              ),
                             ),
-                            child: const Icon(Icons.access_time_filled_rounded, color: Color(0xFF8B5CF6), size: 28),
+                            child: const Icon(
+                              Icons.access_time_filled_rounded,
+                              color: Color(0xFF8B5CF6),
+                              size: 28,
+                            ),
                           ),
                           const SizedBox(height: 16),
                           Text(
-                            _formatPercentage(member['performance_stats']?['punctuality_rate'] ?? 0.0),
+                            _formatPercentage(
+                              member['performance_stats']?['punctuality_rate'] ??
+                                  0.0,
+                            ),
                             style: const TextStyle(
                               fontSize: 28,
                               fontWeight: FontWeight.bold,
@@ -1952,9 +2096,11 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                             ),
                           ),
                           const SizedBox(height: 4),
-                          const Text(
-                            'PUNCTUALITY',
-                            style: TextStyle(
+                          Text(
+                            AppLanguage.tr(
+                              'Petugas.members.punctuality',
+                            ).toUpperCase(),
+                            style: const TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
                               color: Color(0xFF9CA3AF),
@@ -1966,11 +2112,14 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                     ),
                   ),
                   const SizedBox(width: 16),
-                  
+
                   // Attendance Card
                   Expanded(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 24,
+                        horizontal: 16,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(24),
@@ -1978,17 +2127,27 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                           Container(
+                          Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              border: Border.all(color: const Color(0xFF8B5CF6), width: 2),
+                              border: Border.all(
+                                color: const Color(0xFF8B5CF6),
+                                width: 2,
+                              ),
                             ),
-                            child: const Icon(Icons.calendar_today_rounded, color: Color(0xFF8B5CF6), size: 24),
+                            child: const Icon(
+                              Icons.calendar_today_rounded,
+                              color: Color(0xFF8B5CF6),
+                              size: 24,
+                            ),
                           ),
                           const SizedBox(height: 16),
                           Text(
-                            _formatPercentage(member['performance_stats']?['attendance_rate'] ?? 0.0),
+                            _formatPercentage(
+                              member['performance_stats']?['attendance_rate'] ??
+                                  0.0,
+                            ),
                             style: const TextStyle(
                               fontSize: 28,
                               fontWeight: FontWeight.bold,
@@ -1996,14 +2155,16 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                             ),
                           ),
                           const SizedBox(height: 4),
-                          const Text(
-                            'ATTENDANCE',
-                            style: TextStyle(
+                          Text(
+                            AppLanguage.tr(
+                              'Petugas.members.attendance',
+                            ).toUpperCase(),
+                            style: const TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
                               color: Color(0xFF9CA3AF),
                               letterSpacing: 1.0,
-                             ),
+                            ),
                           ),
                         ],
                       ),
@@ -2012,29 +2173,28 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                 ],
               ),
             ],
-            
+
             const SizedBox(height: 32),
-            
+
             // Back Button (Only button needed for this state, or maybe Keep Register for updates?)
             // The image only shows "Back to Profile". But logically we might still want "Update Face".
-            // However, following the image strictly first. 
+            // However, following the image strictly first.
             // If hasFaceData, maybe we hide the big purple "Register" button or move it?
             // The previous code had a purple button + creamy back button.
             // The new image ONLY shows "Back to Profile" (Creamy button).
-            
+
             // Let's keep the Update button but maybe make it less prominent or remove it if strictly following image?
             // The image implies this is a "View Mode" when registered.
             // I will HIDE the Register/Update button when hasFaceData is true to match the image,
             // OR checks if I should keep it. The user said "ini tampilan jika user sudah memiliki data...".
             // It shows NO purple button. So I will ONLY show the Back button in this state.
-            
             if (!hasFaceData)
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
                   onPressed: () {
-                     Navigator.pop(context);
-                     _showRegistrationOptions(member);
+                    Navigator.pop(context);
+                    _showRegistrationOptions(member);
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFFA855F7),
@@ -2046,9 +2206,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                     elevation: 0,
                   ),
                   icon: const Icon(Icons.face, size: 24),
-                  label: const Text(
-                    'Register Face ID',
-                    style: TextStyle(
+                  label: Text(
+                    AppLanguage.tr('Petugas.members.register_face_id'),
+                    style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
@@ -2057,14 +2217,16 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
               ),
 
             if (!hasFaceData) const SizedBox(height: 16),
-            
+
             // Back Button
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: () => Navigator.pop(context),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFFF9E6), // Cream/White Button
+                  backgroundColor: const Color(
+                    0xFFFFF9E6,
+                  ), // Cream/White Button
                   foregroundColor: const Color(0xFF4B5563), // Dark text
                   padding: const EdgeInsets.symmetric(vertical: 18),
                   shape: RoundedRectangleBorder(
@@ -2072,16 +2234,16 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                   ),
                   elevation: 0,
                 ),
-                child: const Text(
-                  'Back to Profile',
-                  style: TextStyle(
+                child: Text(
+                  AppLanguage.tr('Petugas.members.back_to_profile'),
+                  style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
             ),
-            
+
             const SizedBox(height: 16),
           ],
         ),
@@ -2104,7 +2266,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Face Registration',
+              AppLanguage.tr('Petugas.members.face_registration'),
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
@@ -2113,35 +2275,66 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
             ),
             const SizedBox(height: 8),
             Text(
-              'Pilih metode registrasi wajah sesuai kebutuhan.',
-              style: TextStyle(fontSize: 13, color: widget.isDarkMode ? Colors.white54 : Colors.grey),
+              AppLanguage.tr('Petugas.members.choose_registration_method'),
+              style: TextStyle(
+                fontSize: 13,
+                color: widget.isDarkMode ? Colors.white54 : Colors.grey,
+              ),
             ),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: widget.isDarkMode ? Colors.blue.withOpacity(0.15) : Colors.blue.withOpacity(0.05),
+                color: widget.isDarkMode
+                    ? Colors.blue.withOpacity(0.15)
+                    : Colors.blue.withOpacity(0.05),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: widget.isDarkMode ? Colors.blue.withOpacity(0.3) : Colors.blue.withOpacity(0.2)),
+                border: Border.all(
+                  color: widget.isDarkMode
+                      ? Colors.blue.withOpacity(0.3)
+                      : Colors.blue.withOpacity(0.2),
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                   Row(
+                  Row(
                     children: [
-                      Icon(Icons.check_circle, size: 14, color: Color(0xFF10B981)),
+                      Icon(
+                        Icons.check_circle,
+                        size: 14,
+                        color: Color(0xFF10B981),
+                      ),
                       SizedBox(width: 6),
-                      Text('Live Camera: 5 Sudut (Akurasi Tinggi)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: widget.isDarkMode ? Colors.white70 : Colors.black87)),
+                      Text(
+                        'Live Camera: 5 Sudut (Akurasi Tinggi)',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: widget.isDarkMode
+                              ? Colors.white70
+                              : Colors.black87,
+                        ),
+                      ),
                     ],
-                   ),
-                   SizedBox(height: 4),
-                   Row(
+                  ),
+                  SizedBox(height: 4),
+                  Row(
                     children: [
                       Icon(Icons.check_circle, size: 14, color: primaryColor),
                       SizedBox(width: 6),
-                      Text('Upload Photo: 1 Foto Depan (Praktis)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: widget.isDarkMode ? Colors.white70 : Colors.black87)),
+                      Text(
+                        'Upload Photo: 1 Foto Depan (Praktis)',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: widget.isDarkMode
+                              ? Colors.white70
+                              : Colors.black87,
+                        ),
+                      ),
                     ],
-                   ),
+                  ),
                 ],
               ),
             ),
@@ -2163,7 +2356,8 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                           ),
                         ),
                       ).then((refresh) {
-                        if (refresh == true) _loadOrganizationMembersOptimized();
+                        if (refresh == true)
+                          _loadOrganizationMembersOptimized();
                       });
                     },
                   ),
@@ -2189,7 +2383,12 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
     );
   }
 
-  Widget _buildOptionCard(String label, IconData icon, Color color, VoidCallback onTap) {
+  Widget _buildOptionCard(
+    String label,
+    IconData icon,
+    Color color,
+    VoidCallback onTap,
+  ) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
@@ -2198,7 +2397,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
         decoration: BoxDecoration(
           color: color.withOpacity(widget.isDarkMode ? 0.15 : 0.05),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: color.withOpacity(widget.isDarkMode ? 0.3 : 0.1)),
+          border: Border.all(
+            color: color.withOpacity(widget.isDarkMode ? 0.3 : 0.1),
+          ),
         ),
         child: Column(
           children: [
@@ -2206,10 +2407,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
             const SizedBox(height: 12),
             Text(
               label,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
+              style: TextStyle(fontWeight: FontWeight.bold, color: color),
             ),
           ],
         ),
@@ -2220,7 +2418,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
   Future<void> _registerFaceFromSinglePhoto(Map<String, dynamic> member) async {
     final faceService = FaceRecognitionTFLiteService();
     final organizationMemberId = member['id'] as int?;
-    
+
     if (organizationMemberId == null) return;
 
     try {
@@ -2232,10 +2430,14 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
         context: context,
         barrierDismissible: false,
         builder: (context) => AlertDialog(
-          backgroundColor: widget.isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
+          backgroundColor: widget.isDarkMode
+              ? const Color(0xFF2D1B4E)
+              : Colors.white,
           title: Text(
             'Pilih Foto Wajah Depan',
-            style: TextStyle(color: widget.isDarkMode ? Colors.white : Colors.black87),
+            style: TextStyle(
+              color: widget.isDarkMode ? Colors.white : Colors.black87,
+            ),
           ),
           content: Text(
             'Pastikan foto:\n'
@@ -2249,12 +2451,15 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context), 
-              child: const Text('Batal')
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Batal'),
             ),
             ElevatedButton(
               onPressed: () async {
-                final img = await picker.pickImage(source: ImageSource.gallery, imageQuality: 100);
+                final img = await picker.pickImage(
+                  source: ImageSource.gallery,
+                  imageQuality: 100,
+                );
                 if (mounted) Navigator.pop(context, img);
               },
               style: ElevatedButton.styleFrom(
@@ -2279,9 +2484,13 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
         );
 
         // Quality check
-        double qualityScore = (faceTemplate['qualityScore'] as num?)?.toDouble() ?? 0.0;
-        if (qualityScore < 0.85) { // ✅ STRICT: Increased to 85% per user request
-            throw Exception('Kualitas foto kurang baik (Score: ${(qualityScore*100).toInt()}%). Gunakan foto yang lebih jelas (Min. 85%).');
+        double qualityScore =
+            (faceTemplate['qualityScore'] as num?)?.toDouble() ?? 0.0;
+        if (qualityScore < 0.85) {
+          // ✅ STRICT: Increased to 85% per user request
+          throw Exception(
+            'Kualitas foto kurang baik (Score: ${(qualityScore * 100).toInt()}%). Gunakan foto yang lebih jelas (Min. 85%).',
+          );
         }
 
         final biometricService = BiometricService();
@@ -2289,8 +2498,11 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
 
         // 1. Upload Photo
         final processedFile = File(image.path); // Or add compression if needed
-        await storageService.uploadFaceTemplate(processedFile, organizationMemberId);
-        
+        await storageService.uploadFaceTemplate(
+          processedFile,
+          organizationMemberId,
+        );
+
         // 2. Register Template to DB (Version 5 - Single)
         await biometricService.registerFaceTemplate(
           organizationMemberId: organizationMemberId,
@@ -2299,26 +2511,25 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
 
         if (mounted) {
           Navigator.of(context).pop(); // Close processing overlay safely
-          _showSuccessSnackBar('Wajah ${_getMemberName(member)} berhasil didaftarkan (Single Mode)!');
+          _showSuccessSnackBar(
+            'Wajah ${_getMemberName(member)} berhasil didaftarkan (Single Mode)!',
+          );
           _loadOrganizationMembersOptimized();
         }
-
       } catch (e) {
-        if (mounted) Navigator.of(context).pop(); // Close processing overlay on error
+        if (mounted)
+          Navigator.of(context).pop(); // Close processing overlay on error
         _showErrorDialog('Gagal: $e');
       }
-
     } catch (e) {
       debugPrint('Single-photo reg error: $e');
       // If overlay was shown, ensure it's popped (though the inner catch handles most)
-       // Check if we are still in a dialog context if needed, but safest is to rely on user report or inner catch.
+      // Check if we are still in a dialog context if needed, but safest is to rely on user report or inner catch.
       if (mounted) _showErrorDialog('Terjadi kesalahan sistem: $e');
     } finally {
       faceService.dispose();
     }
   }
-
-
 
   void _showProcessingOverlay(BuildContext context, String message) {
     showDialog(
@@ -2336,7 +2547,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                 const SizedBox(height: 16),
                 Text(
                   message,
-                  style: TextStyle(color: widget.isDarkMode ? Colors.white70 : Colors.black87),
+                  style: TextStyle(
+                    color: widget.isDarkMode ? Colors.white70 : Colors.black87,
+                  ),
                 ),
               ],
             ),
@@ -2350,27 +2563,30 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: widget.isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
+        backgroundColor: widget.isDarkMode
+            ? const Color(0xFF2D1B4E)
+            : Colors.white,
         title: Text(
           'Gagal',
-          style: TextStyle(color: widget.isDarkMode ? Colors.white : Colors.black87),
+          style: TextStyle(
+            color: widget.isDarkMode ? Colors.white : Colors.black87,
+          ),
         ),
         content: Text(
           message,
-          style: TextStyle(color: widget.isDarkMode ? Colors.white70 : Colors.black87),
+          style: TextStyle(
+            color: widget.isDarkMode ? Colors.white70 : Colors.black87,
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('OK'),
-          )
+          ),
         ],
       ),
     );
   }
-
-  // Legacy kept for now but unused in flow
-  Future<void> _registerFaceFromPhoto(Map<String, dynamic> member, {required ImageSource source}) async {}
 
   void _showSuccessSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -2406,8 +2622,12 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
     );
   }
 
-
-  Widget _buildDetailStat(String label, String value, IconData icon, Color color) {
+  Widget _buildDetailStat(
+    String label,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
       decoration: BoxDecoration(
@@ -2442,14 +2662,12 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
     );
   }
 
-
-
   Widget _buildPerformanceTab() {
     return Container(
       color: widget.isDarkMode ? const Color(0xFF1F0B38) : Colors.grey.shade50,
       child: RefreshIndicator(
         onRefresh: () async {
-          await _loadOrganizationMembersOptimized();
+          await _applyFilters();
         },
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -2460,17 +2678,21 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                 child: _buildFilterSection(),
               ),
-              
+
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
                 child: Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: widget.isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
+                    color: widget.isDarkMode
+                        ? const Color(0xFF2D1B4E)
+                        : Colors.white,
                     borderRadius: BorderRadius.circular(24),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(widget.isDarkMode ? 0.2 : 0.05),
+                        color: Colors.black.withOpacity(
+                          widget.isDarkMode ? 0.2 : 0.05,
+                        ),
                         blurRadius: 15,
                         offset: const Offset(0, 5),
                       ),
@@ -2480,10 +2702,20 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       // Unified Ranked List
-                      ..._buildPerformersList(),
-                      
+                      if (_isLoadingPerformance)
+                        const Center(
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(vertical: 40),
+                            child: CircularProgressIndicator(
+                              color: Color(0xFF8B5CF6),
+                            ),
+                          ),
+                        )
+                      else ...[
+                        ..._buildPerformersList(),
+                      ],
+
                       const SizedBox(height: 12),
-                      
                     ],
                   ),
                 ),
@@ -2500,10 +2732,14 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
       ..sort((a, b) {
         final aStats = a['performance_stats'] as Map<String, dynamic>;
         final bStats = b['performance_stats'] as Map<String, dynamic>;
-        if (_selectedSortBy == 'Score') {
-          return (bStats['productivity_score'] as num).compareTo(aStats['productivity_score'] as num);
+        if (_selectedSortBy == 'score') {
+          return (bStats['productivity_score'] as num).compareTo(
+            aStats['productivity_score'] as num,
+          );
         } else {
-          return (bStats['present_days'] as num).compareTo(aStats['present_days'] as num);
+          return (bStats['present_days'] as num).compareTo(
+            aStats['present_days'] as num,
+          );
         }
       });
 
@@ -2516,14 +2752,15 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
             padding: EdgeInsets.symmetric(vertical: 40),
             child: Text('No performance data available'),
           ),
-        )
+        ),
       ];
     }
 
     return List.generate(displayList.length, (index) {
       final performer = displayList[index];
-      final performance = performer['performance_stats'] as Map<String, dynamic>;
-      
+      final performance =
+          performer['performance_stats'] as Map<String, dynamic>;
+
       return _buildPerformerListItem(
         performer, // performer map contains member details
         performance,
@@ -2533,9 +2770,18 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
     });
   }
 
-   Widget _buildFilterSection() {
-    final periods = ['Today', 'Yesterday', 'This Week', 'Last Week', 'This Month', 'Last Month', 'This Year', 'Last Year'];
-    
+  Widget _buildFilterSection() {
+    final periods = {
+      'today': AppLanguage.tr('today'),
+      'yesterday': AppLanguage.tr('yesterday'),
+      'this_week': AppLanguage.tr('this_week'),
+      'last_week': AppLanguage.tr('last_week'),
+      'this_month': AppLanguage.tr('this_month'),
+      'last_month': AppLanguage.tr('last_month'),
+      'this_year': AppLanguage.tr('this_year'),
+      'last_year': AppLanguage.tr('last_year'),
+    };
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2545,33 +2791,45 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
           physics: const BouncingScrollPhysics(),
           child: Row(
             children: [
-              ...periods.map((period) {
-                final isSelected = _selectedTimePeriod == period;
+              ...periods.entries.map((entry) {
+                final key = entry.key;
+                final label = entry.value;
+                final isSelected = _selectedTimePeriod == key;
                 return Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: FilterChip(
-                    label: Text(period),
+                    label: Text(label),
                     labelStyle: TextStyle(
                       fontSize: 12,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                      color: isSelected 
-                        ? Colors.white 
-                        : (widget.isDarkMode ? Colors.white70 : Colors.black87),
+                      fontWeight: isSelected
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                      color: isSelected
+                          ? Colors.white
+                          : (widget.isDarkMode
+                                ? Colors.white70
+                                : Colors.black87),
                     ),
                     selected: isSelected,
                     onSelected: (selected) {
                       if (selected) {
-                        setState(() => _selectedTimePeriod = period);
+                        setState(() => _selectedTimePeriod = key);
                         _applyFilters();
                       }
                     },
-                    backgroundColor: widget.isDarkMode ? Colors.white10 : Colors.grey.shade100,
+                    backgroundColor: widget.isDarkMode
+                        ? Colors.white10
+                        : Colors.grey.shade100,
                     selectedColor: const Color(0xFF8938DF),
                     checkmarkColor: Colors.white,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(20),
                       side: BorderSide(
-                        color: isSelected ? Colors.transparent : (widget.isDarkMode ? Colors.white10 : Colors.grey.shade200),
+                        color: isSelected
+                            ? Colors.transparent
+                            : (widget.isDarkMode
+                                  ? Colors.white10
+                                  : Colors.grey.shade200),
                       ),
                     ),
                   ),
@@ -2580,17 +2838,21 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
             ],
           ),
         ),
-        
+
         const SizedBox(height: 12),
-        
+
         // Sort Option (keep it clean)
         Container(
           height: 40,
           padding: const EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
-            color: widget.isDarkMode ? Colors.white.withOpacity(0.03) : Colors.grey.shade50,
+            color: widget.isDarkMode
+                ? Colors.white.withOpacity(0.03)
+                : Colors.grey.shade50,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: widget.isDarkMode ? Colors.white10 : Colors.grey.shade100),
+            border: Border.all(
+              color: widget.isDarkMode ? Colors.white10 : Colors.grey.shade100,
+            ),
           ),
           child: Row(
             children: [
@@ -2599,7 +2861,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w900,
-                  color: widget.isDarkMode ? Colors.white38 : Colors.grey.shade500,
+                  color: widget.isDarkMode
+                      ? Colors.white38
+                      : Colors.grey.shade500,
                   letterSpacing: 1.0,
                 ),
               ),
@@ -2610,19 +2874,33 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                     value: _selectedSortBy,
                     isExpanded: true,
                     isDense: true,
-                    icon: Icon(Icons.sort_rounded, size: 16, color: widget.isDarkMode ? Colors.white38 : Colors.grey),
+                    icon: Icon(
+                      Icons.sort_rounded,
+                      size: 16,
+                      color: widget.isDarkMode ? Colors.white38 : Colors.grey,
+                    ),
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
-                      color: widget.isDarkMode ? Colors.white70 : Colors.black87,
+                      color: widget.isDarkMode
+                          ? Colors.white70
+                          : Colors.black87,
                     ),
-                    dropdownColor: widget.isDarkMode ? const Color(0xFF2D1B4E) : Colors.white,
-                    items: ['Score', 'Logs']
-                        .map((sort) => DropdownMenuItem(
-                              value: sort,
-                              child: Text(sort),
-                            ))
-                        .toList(),
+                    dropdownColor: widget.isDarkMode
+                        ? const Color(0xFF2D1B4E)
+                        : Colors.white,
+                    items:
+                        {
+                              'score': AppLanguage.tr('score'),
+                              'logs': AppLanguage.tr('logs'),
+                            }.entries
+                            .map(
+                              (entry) => DropdownMenuItem(
+                                value: entry.key,
+                                child: Text(entry.value),
+                              ),
+                            )
+                            .toList(),
                     onChanged: (value) {
                       if (value != null) {
                         setState(() => _selectedSortBy = value);
@@ -2639,73 +2917,72 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
     );
   }
 
-
-
   Future<void> _applyFilters() async {
+    if (!mounted) return;
     setState(() => _isLoadingPerformance = true);
-    
+
     try {
       final organizationId = widget.memberData['organization_id'] as int;
-      
+
+      // Load organization performance summary for Overview tab
+      final summary = await _performanceService
+          .getOrganizationPerformanceSummary(
+            organizationId,
+            organizationTimezone: _organizationTimezone,
+          );
+
       // Map time period to service parameter
       String timePeriod;
-      switch (_selectedTimePeriod) {
-        case 'Today':
-          timePeriod = 'today';
-          break;
-        case 'Yesterday':
-          timePeriod = 'yesterday';
-          break;
-        case 'This Week':
-          timePeriod = 'this_week';
-          break;
-        case 'Last Week':
-          timePeriod = 'last_week';
-          break;
-        case 'This Month':
-          timePeriod = 'this_month';
-          break;
-        case 'Last Month':
-          timePeriod = 'last_month';
-          break;
-        case 'This Year':
-          timePeriod = 'this_year';
-          break;
-        case 'Last Year':
-          timePeriod = 'last_year';
-          break;
-        default:
-          timePeriod = 'this_month';
+      if (_selectedTimePeriod == 'today') {
+        timePeriod = 'today';
+      } else if (_selectedTimePeriod == 'yesterday') {
+        timePeriod = 'yesterday';
+      } else if (_selectedTimePeriod == 'this_week') {
+        timePeriod = 'this_week';
+      } else if (_selectedTimePeriod == 'last_week') {
+        timePeriod = 'last_week';
+      } else if (_selectedTimePeriod == 'this_month') {
+        timePeriod = 'this_month';
+      } else if (_selectedTimePeriod == 'last_month') {
+        timePeriod = 'last_month';
+      } else if (_selectedTimePeriod == 'this_year') {
+        timePeriod = 'this_year';
+      } else if (_selectedTimePeriod == 'last_year') {
+        timePeriod = 'last_year';
+      } else {
+        timePeriod = 'this_month';
       }
-      
+
       // Map sort by to service parameter
       String sortBy;
-      if (_selectedSortBy == 'Score') {
+      if (_selectedSortBy == 'score') {
         sortBy = 'productivity';
       } else {
         sortBy = 'attendance';
       }
-      
+
       final filteredData = await _performanceService.getFilteredPerformance(
         organizationId,
         timePeriod: timePeriod,
         sortBy: sortBy,
+        organizationTimezone: _organizationTimezone,
       );
-      
-      setState(() {
-        _membersPerformance = filteredData;
-        _isLoadingPerformance = false;
-      });
-      
+
+      if (mounted) {
+        setState(() {
+          _memberPerformanceStats =
+              summary; // Add summary data for Overview tab
+          _membersPerformance = filteredData;
+          _isLoadingPerformance = false;
+        });
+      }
     } catch (e) {
       debugPrint('Error applying filters: $e');
-      setState(() => _isLoadingPerformance = false);
+      if (mounted) {
+        setState(() => _isLoadingPerformance = false);
+      }
     }
   }
-
-
-
-
 
   Widget _buildPerformerListItem(
     Map<String, dynamic> member,
@@ -2717,16 +2994,21 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
     final totalAttendance = performance['present_days'] as num? ?? 0;
     final totalWorkMinutes = performance['total_work_minutes'] as num? ?? 0;
     final workHours = (totalWorkMinutes.toDouble() / 60).toStringAsFixed(1);
-    final productivityScore = performance['productivity_score'] as double? ?? 0.0;
-    
+    final productivityScore =
+        performance['productivity_score'] as double? ?? 0.0;
+
     // Choose ranking circle color
     final rankColors = [
       const Color(0xFF8B5CF6), // 1st
       const Color(0xFF9333EA), // 2nd
       const Color(0xFFA855F7), // 3rd
     ];
-    final circleColor = rank <= 3 ? rankColors[rank - 1] : (widget.isDarkMode ? Colors.white12 : Colors.grey.shade100);
-    final textColor = rank <= 3 ? Colors.white : (widget.isDarkMode ? Colors.white70 : Colors.black87);
+    final circleColor = rank <= 3
+        ? rankColors[rank - 1]
+        : (widget.isDarkMode ? Colors.white12 : Colors.grey.shade100);
+    final textColor = rank <= 3
+        ? Colors.white
+        : (widget.isDarkMode ? Colors.white70 : Colors.black87);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 1), // Thin line between items
@@ -2734,7 +3016,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(
-            color: widget.isDarkMode ? Colors.white.withOpacity(0.05) : Colors.grey.shade100,
+            color: widget.isDarkMode
+                ? Colors.white.withOpacity(0.05)
+                : Colors.grey.shade100,
             width: 1,
           ),
         ),
@@ -2748,13 +3032,15 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
             decoration: BoxDecoration(
               color: circleColor,
               shape: BoxShape.circle,
-              boxShadow: rank <= 3 ? [
-                BoxShadow(
-                  color: circleColor.withOpacity(0.3),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
-                )
-              ] : null,
+              boxShadow: rank <= 3
+                  ? [
+                      BoxShadow(
+                        color: circleColor.withOpacity(0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ]
+                  : null,
             ),
             alignment: Alignment.center,
             child: Text(
@@ -2785,18 +3071,36 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    Icon(Icons.calendar_today_outlined, size: 12, color: const Color(0xFFA855F7)),
+                    Icon(
+                      Icons.calendar_today_outlined,
+                      size: 12,
+                      color: const Color(0xFFA855F7),
+                    ),
                     const SizedBox(width: 4),
                     Text(
-                      '$totalAttendance Logs',
-                      style: TextStyle(fontSize: 11, color: widget.isDarkMode ? Colors.white54 : Colors.grey.shade600),
+                      '$totalAttendance ${AppLanguage.tr('logs')}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: widget.isDarkMode
+                            ? Colors.white54
+                            : Colors.grey.shade600,
+                      ),
                     ),
                     const SizedBox(width: 12),
-                    Icon(Icons.access_time, size: 12, color: const Color(0xFFA855F7)),
+                    Icon(
+                      Icons.access_time,
+                      size: 12,
+                      color: const Color(0xFFA855F7),
+                    ),
                     const SizedBox(width: 4),
                     Text(
-                      '${workHours}h',
-                      style: TextStyle(fontSize: 11, color: widget.isDarkMode ? Colors.white54 : Colors.grey.shade600),
+                      '${workHours}${AppLanguage.tr('hrs_short')}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: widget.isDarkMode
+                            ? Colors.white54
+                            : Colors.grey.shade600,
+                      ),
                     ),
                   ],
                 ),
@@ -2808,9 +3112,14 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF8B5CF6).withOpacity(widget.isDarkMode ? 0.2 : 0.1),
+                  color: const Color(
+                    0xFF8B5CF6,
+                  ).withOpacity(widget.isDarkMode ? 0.2 : 0.1),
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Text(
@@ -2824,11 +3133,13 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
               ),
               const SizedBox(height: 2),
               Text(
-                'SCORE',
+                AppLanguage.tr('score').toUpperCase(),
                 style: TextStyle(
                   fontSize: 9,
                   fontWeight: FontWeight.w900,
-                  color: widget.isDarkMode ? Colors.white24 : Colors.grey.shade400,
+                  color: widget.isDarkMode
+                      ? Colors.white24
+                      : Colors.grey.shade400,
                   letterSpacing: 0.5,
                 ),
               ),
