@@ -21,13 +21,16 @@ class CameraService {
       print('Initializing cameras...');
       _cameras = await availableCameras();
       _isInitialized = true;
-      
+
       print('Cameras initialized: ${_cameras!.length} cameras found');
       return _cameras!;
     } catch (e) {
       print('Error initializing cameras: $e');
       _isInitialized = false;
-      throw CameraException('initialization_failed', 'Failed to initialize cameras: $e');
+      throw CameraException(
+        'initialization_failed',
+        'Failed to initialize cameras: $e',
+      );
     }
   }
 
@@ -87,21 +90,21 @@ class CameraService {
 
   static int getPreferredCameraIndex() {
     if (!isInitialized || _cameras!.isEmpty) return 0;
-    
+
     final frontIndex = _cameras!.indexWhere(
       (camera) => camera.lensDirection == CameraLensDirection.front,
     );
-    
+
     return frontIndex >= 0 ? frontIndex : 0;
   }
 
   static int? getCameraIndexByDirection(CameraLensDirection direction) {
     if (!isInitialized) return null;
-    
+
     final index = _cameras!.indexWhere(
       (camera) => camera.lensDirection == direction,
     );
-    
+
     return index >= 0 ? index : null;
   }
 
@@ -114,7 +117,7 @@ class CameraService {
   }) async {
     try {
       print('Creating camera controller for: ${camera.name}');
-      
+
       final controller = CameraController(
         camera,
         resolutionPreset,
@@ -124,11 +127,14 @@ class CameraService {
 
       await controller.initialize();
       print('Camera controller initialized');
-      
+
       return controller;
     } catch (e) {
       print('Error creating camera controller: $e');
-      throw CameraException('controller_creation_failed', 'Failed to create camera controller: $e');
+      throw CameraException(
+        'controller_creation_failed',
+        'Failed to create camera controller: $e',
+      );
     }
   }
 
@@ -142,7 +148,7 @@ class CameraService {
 
     final preferredIndex = getPreferredCameraIndex();
     final camera = _cameras![preferredIndex];
-    
+
     return await createController(
       camera,
       resolutionPreset: resolutionPreset,
@@ -155,12 +161,15 @@ class CameraService {
   static Future<XFile> takePicture(CameraController controller) async {
     try {
       if (!controller.value.isInitialized) {
-        throw CameraException('controller_not_initialized', 'Camera controller not initialized');
+        throw CameraException(
+          'controller_not_initialized',
+          'Camera controller not initialized',
+        );
       }
 
       print('Taking picture...');
       final XFile photo = await controller.takePicture();
-      
+
       print('Picture taken: ${photo.path}');
       return photo;
     } catch (e) {
@@ -175,24 +184,24 @@ class CameraService {
   ) async {
     try {
       final photo = await takePicture(controller);
-      
+
       final Directory appDocDir = await getApplicationDocumentsDirectory();
       final String dirPath = '${appDocDir.path}/attendance_photos';
-      
+
       final Directory photoDir = Directory(dirPath);
       if (!await photoDir.exists()) {
         await photoDir.create(recursive: true);
       }
-      
+
       final String filePath = '$dirPath/$fileName';
       await File(photo.path).copy(filePath);
-      
+
       try {
         await File(photo.path).delete();
       } catch (e) {
         print('Warning: Could not delete temp file: $e');
       }
-      
+
       print('Picture saved to: $filePath');
       return filePath;
     } catch (e) {
@@ -228,17 +237,17 @@ class CameraService {
       print('Camera validation failed: Not initialized');
       return false;
     }
-    
+
     if (!hasCameras) {
       print('Camera validation failed: No cameras available');
       return false;
     }
-    
+
     if (!hasFrontCamera && !hasBackCamera) {
       print('Camera validation failed: No usable cameras found');
       return false;
     }
-    
+
     print('Camera setup validation passed');
     return true;
   }
@@ -247,14 +256,14 @@ class CameraService {
     if (!isInitialized) {
       return 'Cameras not initialized';
     }
-    
+
     final buffer = StringBuffer();
     buffer.writeln('Camera Service Info:');
     buffer.writeln('- Total cameras: $cameraCount');
     buffer.writeln('- Has front camera: $hasFrontCamera');
     buffer.writeln('- Has back camera: $hasBackCamera');
     buffer.writeln('- Preferred index: ${getPreferredCameraIndex()}');
-    
+
     return buffer.toString();
   }
 
@@ -279,7 +288,7 @@ class CameraService {
           return 'Error kamera: ${error.description}';
       }
     }
-    
+
     return 'Error tidak dikenal: $error';
   }
 }

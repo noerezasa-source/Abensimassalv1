@@ -942,6 +942,30 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
     );
   }
 
+  void _navigateToProfile() {
+    Navigator.push<bool>(
+      context,
+      PageRouteBuilder(
+        transitionDuration: Duration.zero,
+        reverseTransitionDuration: Duration.zero,
+        pageBuilder: (context, _, __) => Container(
+          color: _isDarkMode
+              ? const Color(0xFF1F0B38)
+              : const Color(0xFFF8F9FA),
+          child: PetugasProfilePage(
+            organizationMemberId: widget.organizationMemberId,
+            memberData: widget.memberData,
+            userProfile: _userProfile ?? widget.userProfile,
+            isDarkMode: _isDarkMode,
+          ),
+        ),
+      ),
+    ).then((_) {
+      _loadAttendanceMode();
+      _loadUserProfile();
+    });
+  }
+
   void _handleNavigation(int index) {
     if (index == _currentNavIndex) return;
 
@@ -1003,30 +1027,9 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
         });
         break;
       case 3:
-        Navigator.push<bool>(
-          context,
-          PageRouteBuilder(
-            transitionDuration: Duration.zero,
-            reverseTransitionDuration: Duration.zero,
-            pageBuilder: (context, _, __) => Container(
-              color: _isDarkMode
-                  ? const Color(0xFF1F0B38)
-                  : const Color(0xFFF8F9FA),
-              child: PetugasProfilePage(
-                organizationMemberId: widget.organizationMemberId,
-                memberData: widget.memberData,
-                userProfile: _userProfile ?? widget.userProfile,
-                isDarkMode: _isDarkMode,
-              ),
-            ),
-          ),
-        ).then((_) {
-          setState(() {
-            _currentNavIndex = 0;
-          });
-          // Always reload attendance mode from SharedPreferences to ensure sync
-          _loadAttendanceMode();
-          _loadUserProfile();
+        _navigateToProfile();
+        setState(() {
+          _currentNavIndex = 0;
         });
         break;
     }
@@ -1216,68 +1219,74 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                       child: Column(
                         children: [
                           // Profile Photo
-                          Container(
-                            width: 110,
-                            height: 110,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.2),
-                                  blurRadius: 15,
-                                  offset: const Offset(0, 8),
-                                ),
-                              ],
-                            ),
-                            child: ClipOval(
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  gradient: LinearGradient(
-                                    colors: _isDarkMode
-                                        ? [
-                                            const Color(0xFFD0BCFF),
-                                            const Color(0xFF8938DF),
-                                          ]
-                                        : [
-                                            const Color(0xFF8938DF),
-                                            const Color(0xFF4A1E79),
-                                          ],
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
+                          GestureDetector(
+                            onTap: _navigateToProfile,
+                            child: Container(
+                              width: 110,
+                              height: 110,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.2),
+                                    blurRadius: 15,
+                                    offset: const Offset(0, 8),
                                   ),
+                                ],
+                              ),
+                              child: ClipOval(
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    gradient: LinearGradient(
+                                      colors: _isDarkMode
+                                          ? [
+                                              const Color(0xFFD0BCFF),
+                                              const Color(0xFF8938DF),
+                                            ]
+                                          : [
+                                              const Color(0xFF8938DF),
+                                              const Color(0xFF4A1E79),
+                                            ],
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                    ),
+                                  ),
+                                  child: _getProfilePhotoUrl() != null
+                                      ? Image.network(
+                                          _getProfilePhotoUrl()!,
+                                          fit: BoxFit.cover,
+                                          errorBuilder:
+                                              (context, error, stackTrace) {
+                                                return const Icon(
+                                                  Icons.person,
+                                                  size: 40,
+                                                  color: Colors.white,
+                                                );
+                                              },
+                                        )
+                                      : const Icon(
+                                          Icons.person,
+                                          size: 40,
+                                          color: Colors.white,
+                                        ),
                                 ),
-                                child: _getProfilePhotoUrl() != null
-                                    ? Image.network(
-                                        _getProfilePhotoUrl()!,
-                                        fit: BoxFit.cover,
-                                        errorBuilder:
-                                            (context, error, stackTrace) {
-                                              return const Icon(
-                                                Icons.person,
-                                                size: 40,
-                                                color: Colors.white,
-                                              );
-                                            },
-                                      )
-                                    : const Icon(
-                                        Icons.person,
-                                        size: 40,
-                                        color: Colors.white,
-                                      ),
                               ),
                             ),
                           ),
                           const SizedBox(height: 12),
                           // Name
-                          Text(
-                            _getFullName().isNotEmpty
-                                ? _getFullName()
-                                : AppLanguage.tr('user'),
-                            style: const TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
+                          GestureDetector(
+                            onTap: _navigateToProfile,
+                            child: Text(
+                              _getFullName().isNotEmpty
+                                  ? _getFullName()
+                                  : AppLanguage.tr('user'),
+                              style: const TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 6),

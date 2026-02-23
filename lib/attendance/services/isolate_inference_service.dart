@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
-import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
@@ -224,13 +223,39 @@ Future<void> _isolateEntryPoint(_IsolateInitData initData) async {
   int landmarkInputSize = 192; // Buffalo_S landmark standard
 
   try {
-    // Attempt to load with NNAPI first if on Android
+    // 1. Define Options with Threads
     InterpreterOptions recognitionOptions = InterpreterOptions()..threads = 4;
     InterpreterOptions landmarkOptions = InterpreterOptions()..threads = 2;
 
     if (Platform.isAndroid) {
+      // ✅ ATTEMPT 1: NNAPI (Neural Network API)
+      // This is the SAFER way to use acceleration on Android.
+      // The OS handles whether to use GPU, NPU, or CPU based on device capability.
       recognitionOptions.useNnApiForAndroid = true;
       landmarkOptions.useNnApiForAndroid = true;
+      debugPrint('ISOLATE: Using NNAPI Acceleration (Safest for Android)');
+
+      /* 
+      // NOTE: GpuDelegateV2 caused SIGSEGV (Native Crash) on some Adreno devices.
+      // We will skip explicit GPU delegation for now to ensure stability.
+      try {
+        final gpuDelegate = GpuDelegateV2();
+        recognitionOptions.addDelegate(gpuDelegate);
+        landmarkOptions.addDelegate(gpuDelegate);
+      } catch (e) {
+        debugPrint('ISOLATE: GPU Delegate failed: $e');
+      }
+      */
+    } else if (Platform.isIOS) {
+      // ✅ IOS: Use Metal/CoreML if available (GpuDelegate for iOS)
+      try {
+        final gpuDelegate = GpuDelegate();
+        recognitionOptions.addDelegate(gpuDelegate);
+        landmarkOptions.addDelegate(gpuDelegate);
+        debugPrint('ISOLATE: Using iOS GPU Acceleration');
+      } catch (e) {
+        debugPrint('ISOLATE: iOS GPU initialization failed: $e');
+      }
     }
 
     try {
@@ -243,8 +268,10 @@ Future<void> _isolateEntryPoint(_IsolateInitData initData) async {
         options: landmarkOptions,
       );
     } catch (e) {
-      debugPrint('ISOLATE: NNAPI failed, falling back to CPU: $e');
-      // FALLBACK: Load without NNAPI
+      debugPrint(
+        'ISOLATE: Accelerated initialization failed, falling back to CPU: $e',
+      );
+      // ✅ ATTEMPT 2: Standard CPU (Final Fallback)
       recognitionOptions = InterpreterOptions()..threads = 4;
       landmarkOptions = InterpreterOptions()..threads = 2;
 
@@ -560,64 +587,6 @@ img.Image _enhanceImage(img.Image image) {
 
   // Apply lighting normalization
   return _normalizeLighting(sharpened);
-}
-
-img.Image _cropAndAlignFace(
-  img.Image image,
-  Map<String, dynamic> faceData,
-  int inputSize,
-) {
-  // 1. Crop face with margin first
-  final box = faceData['boundingBox'] as Map<String, dynamic>;
-  final left = (box['left'] as num).toDouble();
-  final top = (box['top'] as num).toDouble();
-  final width = (box['width'] as num).toDouble();
-  final height = (box['height'] as num).toDouble();
-
-  // Wide margin to allow for rotation without black corners
-  const margin = 0.35;
-  final marginW = width * margin;
-  final marginH = height * margin;
-
-  final x = max(0, (left - marginW).toInt());
-  final y = max(0, (top - marginH).toInt());
-  final w = min(image.width - x, (width + 2 * marginW).toInt());
-  final h = min(image.height - y, (height + 2 * marginH).toInt());
-
-  var croppedFace = img.copyCrop(image, x: x, y: y, width: w, height: h);
-
-  // 2. Calculate rotation from landmarks (now in cropped space)
-  final landmarks = faceData['landmarks'] as Map<String, dynamic>?;
-  if (landmarks != null) {
-    final leftEye = landmarks['leftEye'] as Map<String, dynamic>?;
-    final rightEye = landmarks['rightEye'] as Map<String, dynamic>?;
-
-    if (leftEye != null && rightEye != null) {
-      // Adjust landmark coordinates to cropped space
-      final leftX = (leftEye['x'] as num).toDouble() - x;
-      final leftY = (leftEye['y'] as num).toDouble() - y;
-      final rightX = (rightEye['x'] as num).toDouble() - x;
-      final rightY = (rightEye['y'] as num).toDouble() - y;
-
-      final dx = rightX - leftX;
-      final dy = rightY - leftY;
-      final angle = atan2(dy, dx) * (180.0 / pi);
-
-      // Only rotate if angle is significant
-      if (angle.abs() >= 5.0) {
-        // Rotate around center
-        croppedFace = img.copyRotate(croppedFace, angle: -angle);
-      }
-    }
-  }
-
-  // 3. Resize to model input
-  return img.copyResize(
-    croppedFace,
-    width: inputSize,
-    height: inputSize,
-    interpolation: img.Interpolation.cubic,
-  );
 }
 
 /// Helper to dequantize TFLite output tensors correctly
