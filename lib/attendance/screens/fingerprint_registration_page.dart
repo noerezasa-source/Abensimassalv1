@@ -180,34 +180,33 @@ class _FingerprintRegistrationPageState
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
-          children: [
-            Icon(Icons.check_circle, color: Colors.green),
-            SizedBox(width: 10),
-            Text('Berhasil'),
-          ],
-        ),
-        content: const Text(
-          'Sidik jari Anda telah berhasil didaftarkan ke sistem.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.pop(context, true);
-            },
-            child: const Text(
-              'OK',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF4A1E79),
-              ),
-            ),
+      builder: (context) {
+        // Auto close after 2 seconds
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) {
+            Navigator.of(context).pop(); // Close dialog
+            Navigator.of(
+              context,
+            ).pop(true); // Return to previous page with success
+          }
+        });
+
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
           ),
-        ],
-      ),
+          title: const Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.green),
+              SizedBox(width: 10),
+              Text('Berhasil'),
+            ],
+          ),
+          content: const Text(
+            'Sidik jari Anda telah berhasil didaftarkan ke sistem.',
+          ),
+        );
+      },
     );
   }
 

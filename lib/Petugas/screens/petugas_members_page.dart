@@ -154,8 +154,17 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
     int page = 1,
     bool isInitial = false,
   }) async {
-    final organizationId = widget.memberData['organization_id'] as int?;
-    if (organizationId == null) return;
+    final rawOrgId = widget.memberData['organization_id'];
+    final organizationId = rawOrgId is int
+        ? rawOrgId
+        : int.tryParse(rawOrgId.toString());
+
+    if (organizationId == null) {
+      debugPrint(
+        '❌ ERROR: organizationId is null in _loadOrganizationMembersOptimized',
+      );
+      return;
+    }
 
     if (!mounted) return;
     setState(() {
@@ -168,6 +177,10 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
       final departmentFilter = _selectedDepartment == 'all'
           ? null
           : _selectedDepartment;
+
+      debugPrint(
+        '🔍 REFRESH: Query="$searchQuery", Dept="$departmentFilter", Page=$_currentPage',
+      );
 
       // Fetch members and total count in parallel if it's page 1 or total count is 0
       final futures = <Future>[
@@ -192,6 +205,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
 
       final results = await Future.wait(futures);
       final members = results[0] as List<Map<String, dynamic>>;
+      debugPrint('📦 RESULTS: Received ${members.length} members');
 
       if (mounted) {
         setState(() {
@@ -204,7 +218,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
 
           _isPaginationDisabled = false;
 
-          if (_departments.length <= 1) {
+          if (_departments.length <= 1 && members.isNotEmpty) {
             final deptSet = <String>{'all'};
             for (final member in members) {
               final dept = member['departments'] as Map<String, dynamic>?;
@@ -212,7 +226,8 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                 deptSet.add(dept['name'] as String);
               }
             }
-            _departments = deptSet.toList();
+            _departments = deptSet.toList()..sort();
+            debugPrint('✅ Departments initialized: $_departments');
           }
 
           if (!isInitial) _isContentLoading = false;
@@ -1248,6 +1263,10 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                             ? Colors.white
                             : Colors.black87,
                       ),
+                      textInputAction: TextInputAction.search,
+                      onSubmitted: (value) {
+                        _loadOrganizationMembersOptimized(page: 1);
+                      },
                       decoration: InputDecoration(
                         hintText: AppLanguage.tr('Petugas.members.search'),
                         hintStyle: TextStyle(
@@ -1260,14 +1279,21 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                         isDense: true,
                         contentPadding: EdgeInsets.zero,
                       ),
-                      onChanged: (value) {
-                        Future.delayed(const Duration(milliseconds: 600), () {
-                          if (value == _searchController.text) {
-                            _loadOrganizationMembersOptimized();
-                          }
-                        });
-                      },
                     ),
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      Icons.search,
+                      size: 20,
+                      color: widget.isDarkMode
+                          ? const Color(0xFFD8B4FE)
+                          : primaryColor,
+                    ),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    onPressed: () {
+                      _loadOrganizationMembersOptimized(page: 1);
+                    },
                   ),
                 ],
               ),

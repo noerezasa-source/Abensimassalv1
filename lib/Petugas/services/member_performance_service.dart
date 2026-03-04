@@ -113,7 +113,7 @@ class MemberPerformanceService {
               last_name,
               profile_photo_url
             ),
-            departments!organization_members_department_id_fkey${departmentFilter != null && departmentFilter != 'All' ? '!inner' : ''}(
+            departments!organization_members_department_id_fkey${departmentFilter != null && departmentFilter.toLowerCase() != 'all' ? '!inner' : ''}(
               id,
               name
             ),
@@ -148,7 +148,7 @@ class MemberPerformanceService {
         query = query.ilike('user_profiles.display_name', '%$searchQuery%');
       }
 
-      if (departmentFilter != null && departmentFilter != 'All') {
+      if (departmentFilter != null && departmentFilter.toLowerCase() != 'all') {
         query = query.eq('departments.name', departmentFilter);
       }
 
@@ -194,7 +194,7 @@ class MemberPerformanceService {
       if (searchQuery != null && searchQuery.isNotEmpty) {
         selectStr += ', user_profiles!inner(id)';
       }
-      if (departmentFilter != null && departmentFilter != 'All') {
+      if (departmentFilter != null && departmentFilter.toLowerCase() != 'all') {
         selectStr +=
             ', departments!organization_members_department_id_fkey!inner(id)';
       }
@@ -212,7 +212,7 @@ class MemberPerformanceService {
         query = query.ilike('user_profiles.display_name', '%$searchQuery%');
       }
 
-      if (departmentFilter != null && departmentFilter != 'All') {
+      if (departmentFilter != null && departmentFilter.toLowerCase() != 'all') {
         query = query.eq('departments.name', departmentFilter);
       }
 

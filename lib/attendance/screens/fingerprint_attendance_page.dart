@@ -155,14 +155,36 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
   void _setupFingerprintListeners() {
     _statusSubscription = _fingerprintService.onStatusUpdate.listen((status) {
       if (mounted) {
+        final lowerStatus = status.toLowerCase();
+
+        // Ignore transient capture/extract errors unless they indicate a disconnected device
+        if ((lowerStatus.contains('capture error') ||
+                lowerStatus.contains('extract error')) &&
+            !lowerStatus.contains('not found')) {
+          // If we are already ready, just keep the ready message
+          if (_isScannerReady && !_isProcessing) {
+            setState(
+              () => _statusMessage =
+                  'Silakan tempelkan jari Anda pada scanner...',
+            );
+          }
+          return;
+        }
+
         setState(() {
           _statusMessage = _translateStatus(status);
+
           if (status.contains('Ready') ||
               status.contains('Identification') ||
               status.contains('connect success')) {
             _isScannerReady = true;
-          } else if (status.contains('error') || status.contains('fail')) {
-            _isScannerReady = false;
+          } else if (status.contains('error') ||
+              status.contains('fail') ||
+              status.contains('failed')) {
+            if (!status.contains('Capture error') ||
+                status.contains('not found')) {
+              _isScannerReady = false;
+            }
           }
         });
       }
@@ -180,16 +202,21 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
   }
 
   String _translateStatus(String status) {
-    if (status.contains('Identification active') || status.contains('Ready'))
-      return 'Siap memindai jari...';
+    if (status.contains('Identification active') || status.contains('Ready')) {
+      return 'Silakan tempelkan jari Anda pada scanner...';
+    }
     if (status.contains('connect success')) return 'Scanner terhubung!';
-    if (status.contains('connect failed') || status.contains('failed!'))
+    if (status.contains('connect failed') || status.contains('failed!')) {
       return 'Gagal menghubungkan scanner.';
-    if (status.contains('Capture error'))
+    }
+    if (status.contains('Capture error')) {
       return status.contains('not found')
           ? 'Scanner tidak terdeteksi.'
-          : 'Gagal membaca sidik jari.';
-    if (status.contains('Not recognized')) return 'Jari tidak dikenali.';
+          : 'Silakan tempelkan jari Anda pada scanner...';
+    }
+    if (status.contains('Not recognized')) {
+      return 'TIDAK DIKENALI. Silakan coba lagi.';
+    }
     if (status.contains('Identify success')) return 'Sidik jari dikenali!';
     return status;
   }
