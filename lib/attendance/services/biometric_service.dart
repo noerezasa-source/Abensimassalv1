@@ -224,41 +224,109 @@ class BiometricService {
   Future<List<Map<String, dynamic>>> getAllActiveFingerprintTemplates(
     int organizationId,
   ) async {
+    // Step 1: Try to load from local SQLite cache first (instant, works offline)
+    List<Map<String, dynamic>> cachedTemplates = [];
     try {
-      final results = await _supabase
-          .from('biometric_data')
-          .select('''
-            id,
-            organization_member_id,
-            template_data,
-            organization_members!inner (
-              id,
-              user_id,
-              organization_id,
-              employee_id,
-              department_id,
-              user_profiles!inner (
-                id,
-                first_name,
-                last_name,
-                display_name,
-                profile_photo_url
-              ),
-              departments!organization_members_department_id_fkey (
-                id,
-                name
-              )
-            )
-          ''')
-          .eq('biometric_type', 'fingerprint')
-          .eq('is_active', true)
-          .eq('organization_members.organization_id', organizationId);
-
-      return List<Map<String, dynamic>>.from(results);
+      cachedTemplates = await _offlineDb.getAllBiometricDataWithUserInfo(
+        organizationId: organizationId,
+        biometricType: 'fingerprint',
+      );
+      if (cachedTemplates.isNotEmpty) {
+        debugPrint(
+          '📦 Loaded ${cachedTemplates.length} fingerprint templates from SQLite cache',
+        );
+      }
     } catch (e) {
-      debugPrint('!!! ERROR fetching fingerprint templates: $e');
+      debugPrint('⚠️ Failed to read SQLite cache: $e');
+    }
+
+    // Step 2: Background sync from Supabase to keep cache fresh
+    _syncFingerprintsFromSupabase(organizationId);
+
+    // Step 3: Return cached data immediately if available
+    if (cachedTemplates.isNotEmpty) {
+      return cachedTemplates;
+    }
+
+    // Step 4: If cache is empty (first run), wait for the Supabase fetch
+    debugPrint('📴 SQLite cache empty, waiting for Supabase fetch...');
+    try {
+      final results = await _fetchFingerprintsFromSupabase(organizationId);
+      return results;
+    } catch (e) {
+      debugPrint('❌ Supabase fetch also failed: $e');
       return [];
     }
+  }
+
+  /// Fetch fingerprints from Supabase and sync to SQLite
+  Future<List<Map<String, dynamic>>> _fetchFingerprintsFromSupabase(
+    int organizationId,
+  ) async {
+    final results = await _supabase
+        .from('biometric_data')
+        .select('''
+          id,
+          organization_member_id,
+          template_data,
+          organization_members!inner (
+            id,
+            user_id,
+            organization_id,
+            employee_id,
+            department_id,
+            user_profiles!inner (
+              id,
+              first_name,
+              last_name,
+              display_name,
+              profile_photo_url
+            ),
+            departments!organization_members_department_id_fkey (
+              id,
+              name
+            )
+          )
+        ''')
+        .eq('biometric_type', 'fingerprint')
+        .eq('is_active', true)
+        .eq('organization_members.organization_id', organizationId);
+
+    return List<Map<String, dynamic>>.from(results);
+  }
+
+  /// Background sync: fetch from Supabase and update SQLite (handles deletions)
+  void _syncFingerprintsFromSupabase(int organizationId) {
+    Future(() async {
+      try {
+        debugPrint('🔄 Background fingerprint sync for org $organizationId...');
+        final templates = await _fetchFingerprintsFromSupabase(organizationId);
+
+        // Full replace: removes deleted entries from SQLite too
+        await _offlineDb.syncBiometricData(
+          templates,
+          biometricType: 'fingerprint',
+          organizationId: organizationId,
+        );
+
+        // Cache member info for name/photo display
+        for (var template in templates) {
+          unawaited(
+            _offlineDb.cacheMemberData({
+              'organization_member_id': template['organization_member_id'],
+              'card_number': 'FINGER_${template['organization_member_id']}',
+              'organization_members': template['organization_members'],
+            }),
+          );
+        }
+
+        debugPrint(
+          '✅ Background fingerprint sync done: ${templates.length} templates cached',
+        );
+      } catch (e) {
+        debugPrint('⚠️ Background sync skipped (offline?): $e');
+      }
+    });
   }
 
   Future<bool> hasRegisteredFingerprint(int organizationMemberId) async {

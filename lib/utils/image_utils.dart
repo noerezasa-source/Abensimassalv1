@@ -37,10 +37,11 @@ class ImageUtils {
       for (int x = 0; x < width; x++) {
         final int uvPixelIndex = uvPixelStride * (x >> 1);
         final int yp = image.planes[0].bytes[index + x];
-        
+
         // Use safe index access
         final int uvPos = uvIndex + uvPixelIndex;
-        if (uvPos >= image.planes[1].bytes.length || uvPos >= image.planes[2].bytes.length) {
+        if (uvPos >= image.planes[1].bytes.length ||
+            uvPos >= image.planes[2].bytes.length) {
           continue;
         }
 
@@ -48,7 +49,9 @@ class ImageUtils {
         final int vp = image.planes[2].bytes[uvPos];
 
         int r = (yp + vp * 1436 / 1024 - 179).round().clamp(0, 255);
-        int g = (yp - up * 46549 / 131072 + 44 - vp * 93604 / 131072 + 91).round().clamp(0, 255);
+        int g = (yp - up * 46549 / 131072 + 44 - vp * 93604 / 131072 + 91)
+            .round()
+            .clamp(0, 255);
         int b = (yp + up * 1814 / 1024 - 227).round().clamp(0, 255);
 
         convertedImage.setPixelRgb(x, y, r, g, b);

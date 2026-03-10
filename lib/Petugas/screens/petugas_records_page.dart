@@ -5,7 +5,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../../models/attendance_record.dart';
 import '../../attendance/services/attendance_service.dart';
 import '../../helpers/timezone_helper.dart';
 import '../../auth/services/role_service.dart';
@@ -15,6 +14,7 @@ import 'petugas_dashboard.dart';
 import 'petugas_members_page.dart';
 import 'petugas_profile_page.dart';
 import '../../helpers/language_helper.dart';
+import '../widgets/sync_status_dialog.dart';
 
 class PetugasRecordsPage extends StatefulWidget {
   final int organizationMemberId;
@@ -655,6 +655,20 @@ class _PetugasRecordsPageState extends State<PetugasRecordsPage> {
               fontWeight: FontWeight.bold,
               color: Colors.white,
               letterSpacing: -0.5,
+            ),
+          ),
+          Positioned(
+            right: 0,
+            child: IconButton(
+              icon: const Icon(Icons.sync, color: Colors.white),
+              onPressed: () async {
+                await SyncStatusDialog.show(
+                  context,
+                  isDarkMode: widget.isDarkMode,
+                );
+                refreshData();
+              },
+              tooltip: AppLanguage.tr('Sync Now'),
             ),
           ),
         ],

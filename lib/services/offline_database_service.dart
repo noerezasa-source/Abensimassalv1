@@ -14,6 +14,7 @@ class OfflineDatabaseService {
   OfflineDatabaseService._internal();
 
   static Database? _database;
+  static const _databaseVersion = 10;
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -27,7 +28,7 @@ class OfflineDatabaseService {
 
     final db = await openDatabase(
       path,
-      version: 6, // Increment to version 6 to fix missing biometric_data table
+      version: _databaseVersion,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -50,7 +51,9 @@ class OfflineDatabaseService {
         await db.execute('''
           CREATE TABLE biometric_data (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            supabase_id INTEGER UNIQUE,
             organization_member_id INTEGER NOT NULL,
+            organization_id INTEGER,
             biometric_type TEXT NOT NULL,
             template_data TEXT NOT NULL,
             device_id INTEGER,
@@ -58,8 +61,7 @@ class OfflineDatabaseService {
             last_used_at TEXT,
             is_active INTEGER DEFAULT 1,
             created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE(organization_member_id, biometric_type)
+            updated_at TEXT NOT NULL
           )
         ''');
         await db.execute(
@@ -67,6 +69,9 @@ class OfflineDatabaseService {
         );
         await db.execute(
           'CREATE INDEX IF NOT EXISTS idx_biometric_type ON biometric_data(biometric_type)',
+        );
+        await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_biometric_org ON biometric_data(organization_id)',
         );
         debugPrint('✅ REPAIR: biometric_data table repaired successfully.');
       }
@@ -159,6 +164,7 @@ class OfflineDatabaseService {
         organization_id INTEGER NOT NULL,
         user_id TEXT,
         is_active INTEGER DEFAULT 1,
+        employee_id TEXT,
         cached_at TEXT NOT NULL,
         UNIQUE(organization_member_id, card_number)
       )
@@ -173,11 +179,13 @@ class OfflineDatabaseService {
       CREATE INDEX idx_org_member ON cached_members(organization_member_id)
     ''');
 
-    // ✅ NEW: Create biometric data table (was missing in onCreate)
+    // ✅ NEW: Create biometric data table (updated schema v10)
     await db.execute('''
       CREATE TABLE IF NOT EXISTS biometric_data (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        supabase_id INTEGER UNIQUE,
         organization_member_id INTEGER NOT NULL,
+        organization_id INTEGER,
         biometric_type TEXT NOT NULL,
         template_data TEXT NOT NULL,
         device_id INTEGER,
@@ -185,8 +193,7 @@ class OfflineDatabaseService {
         last_used_at TEXT,
         is_active INTEGER DEFAULT 1,
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE(organization_member_id, biometric_type)
+        updated_at TEXT NOT NULL
       )
     ''');
 
@@ -196,6 +203,45 @@ class OfflineDatabaseService {
 
     await db.execute('''
       CREATE INDEX IF NOT EXISTS idx_biometric_type ON biometric_data(biometric_type)
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_biometric_org ON biometric_data(organization_id)
+    ''');
+
+    // ✅ NEW: Create organization cache table
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cached_organizations (
+        id INTEGER PRIMARY KEY,
+        name TEXT,
+        timezone TEXT,
+        cached_at TEXT NOT NULL
+      )
+    ''');
+
+    // ✅ NEW: Create shifts cache table
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cached_shifts (
+        id INTEGER PRIMARY KEY,
+        organization_id INTEGER NOT NULL,
+        code TEXT,
+        name TEXT,
+        start_time TEXT,
+        end_time TEXT,
+        description TEXT,
+        is_active INTEGER DEFAULT 1,
+        cached_at TEXT NOT NULL
+      )
+    ''');
+
+    // ✅ NEW: Create schedules cache table
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cached_schedules (
+        organization_member_id INTEGER PRIMARY KEY,
+        schedule_data TEXT NOT NULL,
+        cached_date TEXT NOT NULL,
+        cached_at TEXT NOT NULL
+      )
     ''');
   }
 
@@ -297,6 +343,98 @@ class OfflineDatabaseService {
         CREATE INDEX IF NOT EXISTS idx_biometric_type ON biometric_data(biometric_type)
       ''');
     }
+
+    if (oldVersion < 7) {
+      // Add caching tables for version 7
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS cached_organizations (
+          id INTEGER PRIMARY KEY,
+          name TEXT,
+          timezone TEXT,
+          cached_at TEXT NOT NULL
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS cached_shifts (
+          id INTEGER PRIMARY KEY,
+          organization_id INTEGER NOT NULL,
+          code TEXT,
+          name TEXT,
+          start_time TEXT,
+          end_time TEXT,
+          description TEXT,
+          is_active INTEGER DEFAULT 1,
+          cached_at TEXT NOT NULL
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS cached_schedules (
+          organization_member_id INTEGER PRIMARY KEY,
+          schedule_data TEXT NOT NULL,
+          cached_date TEXT NOT NULL,
+          cached_at TEXT NOT NULL
+        )
+      ''');
+    }
+
+    if (oldVersion < 9) {
+      // Add columns for version 9 improvements (notes and employee_id)
+      try {
+        await db.execute(
+          'ALTER TABLE offline_attendances ADD COLUMN notes TEXT',
+        );
+      } catch (e) {
+        debugPrint('⚠️ Notes column might already exist: $e');
+      }
+
+      try {
+        await db.execute(
+          'ALTER TABLE cached_members ADD COLUMN employee_id TEXT',
+        );
+      } catch (e) {
+        debugPrint('⚠️ employee_id column might already exist: $e');
+      }
+    }
+    if (oldVersion < 10) {
+      // ✅ MAJOR FIX: Recreate biometric_data to support multiple fingerprints per member
+      // Old schema had UNIQUE(organization_member_id, biometric_type) only allowing ONE per member.
+      // New schema uses supabase_id as unique key.
+      try {
+        await db.execute('DROP TABLE IF EXISTS biometric_data');
+        await db.execute('''
+          CREATE TABLE biometric_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            supabase_id INTEGER UNIQUE,
+            organization_member_id INTEGER NOT NULL,
+            organization_id INTEGER,
+            biometric_type TEXT NOT NULL,
+            template_data TEXT NOT NULL,
+            device_id INTEGER,
+            enrollment_date TEXT NOT NULL,
+            last_used_at TEXT,
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          )
+        ''');
+        await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_biometric_member ON biometric_data(organization_member_id)',
+        );
+        await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_biometric_type ON biometric_data(biometric_type)',
+        );
+        await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_biometric_org ON biometric_data(organization_id)',
+        );
+        debugPrint(
+          '✅ Migration v10: biometric_data supports multiple fingerprints per member.',
+        );
+      } catch (e) {
+        debugPrint('❌ Migration v10 error: $e');
+      }
+    }
   }
 
   // Insert attendance
@@ -326,13 +464,8 @@ class OfflineDatabaseService {
       // Include RFID and Face Recognition records
       final results = await db.query(
         'offline_attendances',
-        where: 'is_synced = ? AND method IN (?, ?, ?)',
-        whereArgs: [
-          0,
-          'rfid_card_mobile',
-          'FACERECOGNITION',
-          'face_recognition',
-        ],
+        where: 'is_synced = ?',
+        whereArgs: [0],
         orderBy: 'created_at ASC',
       );
       return results.map((map) => OfflineAttendance.fromMap(map)).toList();
@@ -343,11 +476,25 @@ class OfflineDatabaseService {
   }
 
   // Get all attendances (for display)
-  Future<List<OfflineAttendance>> getAllAttendances({int limit = 50}) async {
+  Future<List<OfflineAttendance>> getAllAttendances({
+    int limit = 50,
+    String? methodPattern,
+  }) async {
     try {
       final db = await database;
+
+      String? whereClause;
+      List<dynamic>? whereArgs;
+
+      if (methodPattern != null) {
+        whereClause = 'method LIKE ?';
+        whereArgs = [methodPattern];
+      }
+
       final results = await db.query(
         'offline_attendances',
+        where: whereClause,
+        whereArgs: whereArgs,
         orderBy: 'created_at DESC',
         limit: limit,
       );
@@ -438,8 +585,7 @@ class OfflineDatabaseService {
       final db = await database;
       // Count RFID and face recognition records
       final result = await db.rawQuery(
-        'SELECT COUNT(*) as count FROM offline_attendances WHERE is_synced = 0 AND method IN (?, ?, ?)',
-        ['rfid_card_mobile', 'FACERECOGNITION', 'face_recognition'],
+        'SELECT COUNT(*) as count FROM offline_attendances WHERE is_synced = 0',
       );
       return Sqflite.firstIntValue(result) ?? 0;
     } catch (e) {
@@ -549,46 +695,59 @@ class OfflineDatabaseService {
     }
   }
 
-  // ✅ SYNC Biometric Data (Batch)
-  Future<void> syncBiometricData(List<Map<String, dynamic>> templates) async {
+  // ✅ SYNC Biometric Data - Full replace per organization (handles deletions)
+  Future<void> syncBiometricData(
+    List<Map<String, dynamic>> templates, {
+    String biometricType = 'face_recognition',
+    int? organizationId,
+  }) async {
     final db = await database;
-    final batch = db.batch();
 
     try {
-      // debugPrint('🔄 Syncing ${templates.length} biometric templates to SQLite...');
+      await db.transaction((txn) async {
+        // Step 1: Delete all stale entries for this org + type
+        // This ensures deleted fingerprints in Supabase are removed from cache too
+        if (organizationId != null) {
+          final deleted = await txn.delete(
+            'biometric_data',
+            where: 'biometric_type = ? AND organization_id = ?',
+            whereArgs: [biometricType, organizationId],
+          );
+          if (deleted > 0) {
+            debugPrint(
+              '🗑️ Removed $deleted stale $biometricType entries for org $organizationId',
+            );
+          }
+        }
 
-      for (var template in templates) {
-        // Prepare data for SQLite
-        final data = {
-          'organization_member_id': template['organization_member_id'],
-          'biometric_type':
-              'face_recognition', // Hardcoded as we filter by this
-          'template_data': template['template_data'],
-          'enrollment_date':
-              template['enrollment_date'] ??
-              TimezoneHelper.formatUtcForSupabase(DateTime.now()),
-          'is_active':
-              (template['is_active'] == true || template['is_active'] == 1)
-              ? 1
-              : 0, // ✅ Ensure boolean/int is 1/0
-          'created_at':
-              template['created_at'] ??
-              TimezoneHelper.formatUtcForSupabase(DateTime.now()),
-          'updated_at': TimezoneHelper.formatUtcForSupabase(DateTime.now()),
-        };
+        // Step 2: Insert fresh data from Supabase
+        final now = TimezoneHelper.formatUtcForSupabase(DateTime.now());
+        for (var template in templates) {
+          final orgMemberId = template['organization_member_id'];
+          final supabaseId = template['id'];
+          final orgId =
+              organizationId ??
+              (template['organization_members']?['organization_id'] as int?);
 
-        // Upsert logic: INSERT OR REPLACE
-        batch.insert(
-          'biometric_data',
-          data,
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
-      }
+          await txn.insert('biometric_data', {
+            'supabase_id': supabaseId,
+            'organization_member_id': orgMemberId,
+            'organization_id': orgId,
+            'biometric_type': biometricType,
+            'template_data': template['template_data'],
+            'enrollment_date': template['enrollment_date'] ?? now,
+            'is_active': 1,
+            'created_at': template['created_at'] ?? now,
+            'updated_at': now,
+          }, conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+      });
 
-      await batch.commit(noResult: true);
-      debugPrint('✅ Synced ${templates.length} face templates to offline DB');
+      debugPrint(
+        '✅ Synced ${templates.length} $biometricType templates to offline DB (org: $organizationId)',
+      );
     } catch (e) {
-      debugPrint('❌ Error syncing biometric data: $e');
+      debugPrint('❌ Error syncing biometric data ($biometricType): $e');
     }
   }
 
@@ -982,6 +1141,7 @@ class OfflineDatabaseService {
   // ✅ NEW: Get all biometric data with user info from SQLite for offline use
   Future<List<Map<String, dynamic>>> getAllBiometricDataWithUserInfo({
     required int organizationId,
+    String biometricType = 'face_recognition',
   }) async {
     try {
       final db = await database;
@@ -1011,10 +1171,11 @@ class OfflineDatabaseService {
         LEFT JOIN cached_members cm ON bd.organization_member_id = cm.organization_member_id
           AND cm.organization_id = ?
           AND cm.is_active = 1
-        WHERE bd.biometric_type = 'face_recognition'
+        WHERE bd.biometric_type = ?
           AND bd.is_active = 1
+          AND (bd.organization_id = ? OR bd.organization_id IS NULL)
       ''',
-        [organizationId],
+        [organizationId, biometricType, organizationId],
       );
 
       final results = <Map<String, dynamic>>[];
@@ -1105,6 +1266,235 @@ class OfflineDatabaseService {
     } catch (e) {
       debugPrint('❌ Error during pruning: $e');
       return 0;
+    }
+  }
+  // --- NEW: Organization Caching ---
+
+  Future<void> cacheOrganizationData(Map<String, dynamic> orgData) async {
+    try {
+      final db = await database;
+      await db.insert('cached_organizations', {
+        'id': orgData['id'],
+        'name': orgData['name'],
+        'timezone': orgData['timezone'],
+        'cached_at': DateTime.now().toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    } catch (e) {
+      debugPrint('❌ Error caching organization: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>?> getOrganizationData(int orgId) async {
+    try {
+      final db = await database;
+      final results = await db.query(
+        'cached_organizations',
+        where: 'id = ?',
+        whereArgs: [orgId],
+        limit: 1,
+      );
+      return results.isNotEmpty ? results.first : null;
+    } catch (e) {
+      debugPrint('❌ Error getting cached organization: $e');
+      return null;
+    }
+  }
+
+  // --- NEW: Shift Caching ---
+
+  Future<void> cacheShifts(int orgId, List<Map<String, dynamic>> shifts) async {
+    try {
+      final db = await database;
+      final batch = db.batch();
+
+      // Clear old shifts for this org
+      batch.delete(
+        'cached_shifts',
+        where: 'organization_id = ?',
+        whereArgs: [orgId],
+      );
+
+      for (var shift in shifts) {
+        batch.insert('cached_shifts', {
+          'id': shift['id'],
+          'organization_id': orgId,
+          'code': shift['code'],
+          'name': shift['name'],
+          'start_time': shift['start_time'],
+          'end_time': shift['end_time'],
+          'description': shift['description'],
+          'is_active': (shift['is_active'] == true || shift['is_active'] == 1)
+              ? 1
+              : 0,
+          'cached_at': DateTime.now().toIso8601String(),
+        });
+      }
+      await batch.commit(noResult: true);
+    } catch (e) {
+      debugPrint('❌ Error caching shifts: $e');
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getShifts(int orgId) async {
+    try {
+      final db = await database;
+      return await db.query(
+        'cached_shifts',
+        where: 'organization_id = ? AND is_active = 1',
+        whereArgs: [orgId],
+        orderBy: 'name ASC',
+      );
+    } catch (e) {
+      debugPrint('❌ Error getting cached shifts: $e');
+      return [];
+    }
+  }
+
+  // --- NEW: Schedule Caching ---
+
+  Future<void> cacheSchedule(
+    int memberId,
+    Map<String, dynamic> scheduleData,
+  ) async {
+    try {
+      final db = await database;
+      await db.insert('cached_schedules', {
+        'organization_member_id': memberId,
+        'schedule_data': jsonEncode(scheduleData),
+        'cached_date': DateTime.now().toIso8601String().split('T')[0],
+        'cached_at': DateTime.now().toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    } catch (e) {
+      debugPrint('❌ Error caching schedule: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>?> getCachedSchedule(int memberId) async {
+    try {
+      final db = await database;
+      final todayStr = DateTime.now().toIso8601String().split('T')[0];
+
+      final results = await db.query(
+        'cached_schedules',
+        where: 'organization_member_id = ? AND cached_date = ?',
+        whereArgs: [memberId, todayStr],
+        limit: 1,
+      );
+
+      if (results.isNotEmpty) {
+        return jsonDecode(results.first['schedule_data'] as String);
+      }
+      return null;
+    } catch (e) {
+      debugPrint('❌ Error getting cached schedule: $e');
+      return null;
+    }
+  }
+
+  // ✅ Manual Check Page Fallbacks
+  Future<void> cacheOrganizationMembers(
+    int organizationId,
+    List<Map<String, dynamic>> members,
+  ) async {
+    try {
+      final db = await database;
+      final batch = db.batch();
+
+      for (var member in members) {
+        final profile = member['user_profiles'] as Map<String, dynamic>?;
+        batch.insert('cached_members', {
+          'organization_member_id': member['id'],
+          'display_name': profile?['display_name'],
+          'first_name': profile?['first_name'],
+          'last_name': profile?['last_name'],
+          'profile_photo_url': profile?['profile_photo_url'],
+          'organization_id': organizationId,
+          'employee_id': member['employee_id'],
+          'user_id': member['user_id'],
+          'is_active': 1,
+          'cached_at': DateTime.now().toUtc().toIso8601String(),
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+
+      await batch.commit(noResult: true);
+      debugPrint('💾 Cached ${members.length} organization members');
+    } catch (e) {
+      debugPrint('❌ Error caching organization members: $e');
+    }
+  }
+
+  Future<List<Map<String, dynamic>>?> getOrganizationMembers(
+    int organizationId,
+  ) async {
+    try {
+      final db = await database;
+      final results = await db.query(
+        'cached_members',
+        where: 'organization_id = ? AND is_active = 1',
+        whereArgs: [organizationId],
+      );
+
+      return results.map((row) {
+        return {
+          'id': row['organization_member_id'],
+          'employee_id': row['employee_id'],
+          'user_id': row['user_id'],
+          'user_profiles': {
+            'display_name': row['display_name'],
+            'first_name': row['first_name'],
+            'last_name': row['last_name'],
+            'profile_photo_url': row['profile_photo_url'],
+          },
+        };
+      }).toList();
+    } catch (e) {
+      debugPrint('❌ Error getting cached members: $e');
+      return null;
+    }
+  }
+
+  Future<int?> cacheAttendance(Map<String, dynamic> data) async {
+    try {
+      final db = await database;
+
+      // Determine event_type and timestamp flexibly
+      String? eventType = data['event_type'];
+      if (eventType == null) {
+        eventType = data['actual_check_in'] != null ? 'check_in' : 'check_out';
+      }
+
+      String? timestamp = data['timestamp'];
+      if (timestamp == null) {
+        timestamp =
+            data['actual_check_in'] ??
+            data['actual_check_out'] ??
+            data['offline_timestamp'];
+      }
+
+      if (timestamp == null) {
+        timestamp = DateTime.now().toUtc().toIso8601String();
+      }
+
+      final method = data['method'] ?? 'manual';
+      final memberId = data['organization_member_id'];
+
+      // Map to the offline attendance table format
+      return await db.insert('offline_attendances', {
+        'organization_member_id': memberId,
+        'event_type': eventType,
+        'method': method,
+        'timestamp': timestamp,
+        'is_synced': 0,
+        'notes': data['notes'],
+        'user_name': data['user_name'],
+        'card_number':
+            data['card_number'] ?? '${method.toUpperCase()}_$memberId',
+        'work_time_mode': data['work_time_mode'],
+        'created_at': DateTime.now().toUtc().toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    } catch (e) {
+      debugPrint('❌ Error caching attendance: $e');
+      return null;
     }
   }
 }

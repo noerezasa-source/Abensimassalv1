@@ -6,6 +6,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../helpers/language_helper.dart';
 import '../../helpers/sound_helper.dart';
 import '../../helpers/timezone_helper.dart';
+import '../../services/offline_database_service.dart';
+import '../services/attendance_sync_service.dart';
 import '../services/fingerprint_service.dart';
 import '../services/biometric_service.dart';
 import '../services/attendance_service.dart';
@@ -33,6 +35,8 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
   final AttendanceService _attendanceService = AttendanceService();
   final FingerprintService _fingerprintService = FingerprintService();
   final BiometricService _biometricService = BiometricService();
+  final OfflineDatabaseService _offlineDb = OfflineDatabaseService();
+  String? _organizationName;
 
   final List<_AttendanceEntry> _entries = [];
   Timer? _clockTimer;
@@ -44,6 +48,9 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
   bool _isLoadingModes = false;
   DailySchedule? _dailySchedule;
   String _organizationTimezone = 'Asia/Jakarta';
+
+  Map<String, dynamic>? _memberSchedule;
+  String? _workTimeMode;
 
   // Duplicate Prevention
   final Map<String, DateTime> _lastAttendanceTime = {};
@@ -68,6 +75,7 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
     _organizationTimezone =
         widget.userProfile?['organization']?['timezone'] ?? 'Asia/Jakarta';
     _startClock();
+    _loadOrganizationData();
     _loadAvailableModes();
     _loadMemberSchedule();
     _setupFingerprintListeners();
@@ -96,9 +104,12 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
         widget.organizationMemberId,
         organizationTimezone: _organizationTimezone,
       );
-      if (mounted) setState(() => _dailySchedule = dailySched);
+      if (mounted) {
+        setState(() => _dailySchedule = dailySched);
+      }
     } catch (e) {
-      debugPrint('Error loading schedule: $e');
+      debugPrint('🌐 Offline/Error loading schedule: $e');
+      // Fallback is already handled by AttendanceService.getTodaySchedule
     }
   }
 
@@ -238,11 +249,18 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
     final orgId = _organizationId;
     if (orgId == null) return;
     try {
+      debugPrint('🔍 Loading fingerprint templates for org: $orgId');
       final templates = await _biometricService
           .getAllActiveFingerprintTemplates(orgId);
-      setState(() => _allTemplates = templates);
+
+      if (mounted) {
+        setState(() {
+          _allTemplates = templates;
+        });
+      }
+      debugPrint('✅ Found ${templates.length} fingerprint templates');
     } catch (e) {
-      debugPrint('Error loading templates: $e');
+      debugPrint('❌ Error loading fingerprint templates: $e');
     }
   }
 
@@ -270,6 +288,9 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
       }
 
       if (_allTemplates.isNotEmpty) {
+        debugPrint(
+          '📥 Loading ${_allTemplates.length} templates into scanner...',
+        );
         final List<Map<String, dynamic>> formatted = _allTemplates
             .map(
               (t) => {
@@ -278,7 +299,8 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
               },
             )
             .toList();
-        await _fingerprintService.loadTemplates(formatted);
+        final loadResult = await _fingerprintService.loadTemplates(formatted);
+        debugPrint('📤 Scanner load result: $loadResult');
         await _fingerprintService.startIdentification();
       } else {
         setState(
@@ -307,26 +329,98 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
           .eq('organization_id', orgId)
           .eq('is_active', true)
           .order('name', ascending: true);
-      setState(() {
-        _availableModes = List<Map<String, dynamic>>.from(modes);
-        if (_availableModes.isNotEmpty) _selectedMode = _availableModes.first;
-      });
+
+      if (mounted) {
+        setState(() {
+          _availableModes = List<Map<String, dynamic>>.from(modes);
+          if (_availableModes.isNotEmpty) _selectedMode = _availableModes.first;
+        });
+
+        // Cache shifts for offline use
+        await _offlineDb.cacheShifts(orgId, _availableModes);
+      }
     } catch (e) {
-      debugPrint('Error loading modes: $e');
+      debugPrint('🌐 Offline/Error loading modes result: $e');
+
+      // Fallback to cache
+      final cachedShifts = await _offlineDb.getShifts(orgId);
+      if (mounted) {
+        setState(() {
+          _availableModes = List<Map<String, dynamic>>.from(cachedShifts);
+          if (_availableModes.isNotEmpty) _selectedMode = _availableModes.first;
+        });
+        if (_availableModes.isNotEmpty) {
+          debugPrint(
+            '💾 Using cached shifts (${_availableModes.length} found)',
+          );
+        }
+      }
     } finally {
       if (mounted) setState(() => _isLoadingModes = false);
     }
   }
 
+  Future<void> _loadOrganizationData() async {
+    final orgId = _organizationId;
+    if (orgId == null) return;
+
+    try {
+      final org = await _supabase
+          .from('organizations')
+          .select('timezone, name')
+          .eq('id', orgId)
+          .maybeSingle();
+
+      if (org != null && mounted) {
+        setState(() {
+          _organizationTimezone = org['timezone'] as String? ?? 'Asia/Jakarta';
+          _organizationName = org['name'] as String? ?? '';
+        });
+
+        // Cache for offline use
+        await _offlineDb.cacheOrganizationData({
+          'id': orgId,
+          'name': _organizationName,
+          'timezone': _organizationTimezone,
+        });
+      }
+    } catch (e) {
+      debugPrint('🌐 Offline/Error loading org data: $e');
+
+      // Try fallback from cache
+      final cachedOrg = await _offlineDb.getOrganizationData(orgId);
+      if (cachedOrg != null && mounted) {
+        setState(() {
+          _organizationTimezone =
+              cachedOrg['timezone'] as String? ?? 'Asia/Jakarta';
+          _organizationName = cachedOrg['name'] as String? ?? '';
+        });
+        debugPrint('💾 Using cached organization data');
+      }
+    }
+  }
+
   Future<void> _handleIdentificationMatch(Map<String, dynamic> result) async {
+    debugPrint('🎯 Fingerprint Match Result: $result');
+
     final mid = int.tryParse(result['memberId']?.toString() ?? '');
-    if (mid == null) return;
+    if (mid == null) {
+      debugPrint('⚠️ Invalid memberId in match result');
+      return;
+    }
 
     final info = _allTemplates.firstWhere(
       (t) => t['organization_member_id'] == mid,
       orElse: () => {},
     );
-    if (info.isEmpty) return;
+    if (info.isEmpty) {
+      debugPrint(
+        '❌ Member info not found in local template list for MID: $mid',
+      );
+      return;
+    }
+
+    debugPrint('👤 Identified member: ${mid} (Info found: ${info.isNotEmpty})');
 
     final action = _attendanceMode;
     final workMode = _selectedMode?['code'] ?? _selectedMode?['name'];
@@ -362,7 +456,7 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
     setState(() => _isProcessing = true);
     try {
       await SoundHelper.playSuccessSound();
-      _recordAttendance(mid, _organizationTimezone, action, workMode);
+      await _recordAttendance(mid, _organizationTimezone, action, workMode);
 
       // Update cooldown
       _lastAttendanceTime[cooldownKey] = DateTime.now();
@@ -476,34 +570,82 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
     String? workMode,
   ) async {
     try {
+      debugPrint('🌐 Attempting online record for MID: $mid, Action: $action');
+
       switch (action) {
         case 'check_in':
           await _attendanceService.checkInFingerprint(
             organizationMemberId: mid,
             organizationTimezone: tz,
+            rawData: {'work_time_mode': workMode ?? _getWorkTimeMode()},
           );
           break;
         case 'check_out':
           await _attendanceService.checkOutFingerprint(
             organizationMemberId: mid,
             organizationTimezone: tz,
+            rawData: {'work_time_mode': workMode ?? _getWorkTimeMode()},
           );
           break;
         case 'break_start':
           await _attendanceService.breakOutFingerprint(
             organizationMemberId: mid,
             organizationTimezone: tz,
+            rawData: {'work_time_mode': workMode ?? _getWorkTimeMode()},
           );
           break;
         case 'break_end':
           await _attendanceService.breakInFingerprint(
             organizationMemberId: mid,
             organizationTimezone: tz,
+            rawData: {'work_time_mode': workMode ?? _getWorkTimeMode()},
           );
           break;
       }
+      debugPrint('✅ Online record successful for MID: $mid');
     } catch (e) {
-      debugPrint('Record failed: $e');
+      debugPrint('⚠️ Online record failed, falling back to offline: $e');
+
+      // Fallback to offline storage
+      await _saveOfflineAttendance(
+        mid: mid,
+        action: action,
+        workMode: workMode ?? _getWorkTimeMode(),
+      );
+    }
+  }
+
+  Future<void> _saveOfflineAttendance({
+    required int mid,
+    required String action,
+    String? workMode,
+  }) async {
+    try {
+      final info = _allTemplates.firstWhere(
+        (t) => t['organization_member_id'] == mid,
+        orElse: () => {},
+      );
+      final profile =
+          (info['organization_members'] as Map?)?['user_profiles'] as Map?;
+      final name =
+          profile?['display_name'] ?? profile?['first_name'] ?? 'Member';
+
+      debugPrint('💾 Saving offline attendance for $name (MID: $mid)...');
+
+      await _offlineDb.cacheAttendance({
+        'organization_member_id': mid,
+        'user_name': name,
+        'event_type': action,
+        'method': 'fingerprint',
+        'work_time_mode': workMode,
+      });
+
+      debugPrint('✅ Saved fingerprint attendance for $name offline');
+
+      // Trigger background sync
+      AttendanceSyncService().syncPendingAttendances();
+    } catch (e) {
+      debugPrint('❌ Failed to save fingerprint attendance offline: $e');
     }
   }
 
@@ -694,6 +836,80 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
         ),
       ),
     );
+  }
+
+  String _getWorkTimeMode() {
+    if (_workTimeMode != null) return _workTimeMode!;
+    if (_memberSchedule == null) return 'work_time';
+
+    try {
+      final orgTime = TimezoneHelper.convertUtcToOrgTimezone(
+        DateTime.now().toUtc(),
+        _organizationTimezone,
+      );
+
+      final currentMinutes = orgTime.hour * 60 + orgTime.minute;
+      final scheduleType = _memberSchedule!['type'] as String?;
+
+      if (scheduleType == 'shift') {
+        final shift = _memberSchedule!['shift'] as Map<String, dynamic>?;
+        if (shift != null) {
+          final startTime = _parseTimeString(shift['start_time'] as String?);
+          final endTime = _parseTimeString(shift['end_time'] as String?);
+
+          if (startTime != null && endTime != null) {
+            final startMin = startTime.hour * 60 + startTime.minute;
+            final endMin = endTime.hour * 60 + endTime.minute;
+
+            if (currentMinutes >= startMin && currentMinutes < endMin) {
+              return 'work_time';
+            }
+          }
+        }
+      } else if (scheduleType == 'work_schedule') {
+        final detail = _memberSchedule!['detail'] as Map<String, dynamic>?;
+        if (detail != null) {
+          final startTime = _parseTimeString(detail['start_time'] as String?);
+          final breakStart = _parseTimeString(detail['break_start'] as String?);
+          final breakEnd = _parseTimeString(detail['break_end'] as String?);
+
+          if (startTime != null && breakStart != null && breakEnd != null) {
+            final startMin = startTime.hour * 60 + startTime.minute;
+            final breakStartMin = breakStart.hour * 60 + breakStart.minute;
+            final breakEndMin = breakEnd.hour * 60 + breakEnd.minute;
+
+            if (currentMinutes >= startMin && currentMinutes < breakStartMin) {
+              return 'work_time';
+            } else if (currentMinutes >= breakStartMin &&
+                currentMinutes < breakEndMin) {
+              return 'break_time';
+            } else if (currentMinutes >= breakEndMin) {
+              return 'work_time';
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error getting work time mode: $e');
+    }
+
+    return 'work_time';
+  }
+
+  TimeOfDay? _parseTimeString(String? timeStr) {
+    if (timeStr == null) return null;
+    try {
+      final parts = timeStr.split(':');
+      if (parts.length >= 2) {
+        return TimeOfDay(
+          hour: int.parse(parts[0]),
+          minute: int.parse(parts[1]),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error parsing time: $timeStr');
+    }
+    return null;
   }
 
   Widget _buildFingerprintPreview() {
@@ -891,204 +1107,317 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
   }
 
   Future<void> _openShiftSelectionSheet() async {
+    await _loadAvailableModes();
+    if (!mounted) return;
+
     final selected = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              AppLanguage.tr('attendance.fingerprint.select_shift'),
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF9333EA),
-              ),
-            ),
-            const SizedBox(height: 24),
-            ..._availableModes.map((mode) {
-              bool sel = _selectedMode?['id'] == mode['id'];
-              return ListTile(
-                tileColor: sel ? const Color(0xFFF3E8FF) : null,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                title: Text(
-                  mode['name'] ??
-                      AppLanguage.tr('attendance.fingerprint.shift'),
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: sel ? Colors.black : Colors.black87,
+      builder: (context) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-                subtitle: Text('${mode['start_time']} - ${mode['end_time']}'),
-                trailing: sel
-                    ? const Icon(Icons.check_circle, color: Color(0xFF9333EA))
-                    : null,
-                onTap: () => Navigator.pop(context, mode),
-              );
-            }),
-            const SizedBox(height: 16),
-          ],
-        ),
-      ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                AppLanguage.tr('attendance.fingerprint.select_shift'),
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF9333EA), // Purple title
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              ..._availableModes.map((mode) {
+                final isSelected = _selectedMode?['id'] == mode['id'];
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: InkWell(
+                    onTap: () => Navigator.pop(context, mode),
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? const Color(0xFFF3E8FF)
+                            : Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: isSelected
+                              ? const Color(0xFF9333EA)
+                              : Colors.grey.shade200,
+                          width: isSelected ? 2 : 1,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? const Color(0xFF9333EA).withOpacity(0.1)
+                                  : Colors.grey.shade100,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              _getIconForMode(mode['name'] ?? ''),
+                              color: isSelected
+                                  ? const Color(0xFF9333EA)
+                                  : Colors.grey,
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  mode['name'] ?? 'Shift',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                    color: isSelected
+                                        ? Colors.black
+                                        : Colors.black87,
+                                  ),
+                                ),
+                                if (mode['start_time'] != null &&
+                                    mode['end_time'] != null)
+                                  Text(
+                                    '${mode['start_time']} - ${mode['end_time']}',
+                                    style: TextStyle(
+                                      color: Colors.grey.shade600,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          if (isSelected)
+                            Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF9333EA),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.check,
+                                color: Colors.white,
+                                size: 14,
+                              ),
+                            )
+                          else
+                            Container(
+                              width: 24,
+                              height: 24,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.grey.shade300),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
+
+              const SizedBox(height: 16),
+            ],
+          ),
+        );
+      },
     );
+
     if (selected != null && mounted) {
-      setState(() => _selectedMode = selected);
+      setState(() {
+        _selectedMode = selected;
+        _workTimeMode =
+            selected['code'] as String? ?? selected['name'] as String?;
+      });
       await _showInOutSelector();
     }
   }
 
+  IconData _getIconForMode(String name) {
+    name = name.toLowerCase();
+    if (name.contains('morning') || name.contains('pagi'))
+      return Icons.wb_sunny_outlined;
+    if (name.contains('afternoon') || name.contains('siang'))
+      return Icons.wb_twilight;
+    if (name.contains('night') || name.contains('malam'))
+      return Icons.nights_stay_outlined;
+    return Icons.schedule;
+  }
+
   Future<void> _showInOutSelector() async {
-    final picked = await showModalBottomSheet<String>(
+    if (!mounted) return;
+    final pickedMode = await showModalBottomSheet<String>(
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 12),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(12),
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
-              ),
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                      onPressed: () => Navigator.pop(context, 'check_in'),
-                      child: Text(
-                        AppLanguage.tr('attendance.fingerprint.in'),
-                        style: const TextStyle(fontSize: 14),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                      onPressed: () => Navigator.pop(context, 'check_out'),
-                      child: Text(
-                        AppLanguage.tr('attendance.fingerprint.out'),
-                        style: const TextStyle(fontSize: 14),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              StatefulBuilder(
-                builder: (context, setState2) {
-                  final b = _computeBreakButtonState();
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: b.canBreakOut
-                                    ? Colors.orange
-                                    : Colors.grey.shade400,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 12,
-                                ),
-                              ),
-                              onPressed: b.canBreakOut
-                                  ? () => Navigator.pop(context, 'break_start')
-                                  : null,
-                              child: Text(
-                                AppLanguage.tr(
-                                  'attendance.fingerprint.break_in',
-                                ),
-                                style: const TextStyle(fontSize: 14),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: b.canBreakIn
-                                    ? Colors.blue
-                                    : Colors.grey.shade400,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 12,
-                                ),
-                              ),
-                              onPressed: b.canBreakIn
-                                  ? () => Navigator.pop(context, 'break_end')
-                                  : null,
-                              child: Text(
-                                AppLanguage.tr(
-                                  'attendance.fingerprint.break_out',
-                                ),
-                                style: const TextStyle(fontSize: 14),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (b.hint != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 6),
-                          child: Text(
-                            b.hint!,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.orange.shade700,
-                            ),
-                          ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
                         ),
-                    ],
-                  );
-                },
-              ),
-            ],
+                        onPressed: () => Navigator.pop(context, 'check_in'),
+                        child: const Text('IN'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        onPressed: () => Navigator.pop(context, 'check_out'),
+                        child: const Text('OUT'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                StatefulBuilder(
+                  builder: (context, setState2) {
+                    final bState = _computeBreakButtonState();
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: bState.canBreakOut
+                                      ? Colors.orange
+                                      : Colors.grey.shade400,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 12,
+                                  ),
+                                ),
+                                onPressed: bState.canBreakOut
+                                    ? () =>
+                                          Navigator.pop(context, 'break_start')
+                                    : null,
+                                child: Text(
+                                  AppLanguage.tr(
+                                    'attendance.fingerprint.break_in',
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: bState.canBreakIn
+                                      ? Colors.blue
+                                      : Colors.grey.shade400,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 12,
+                                  ),
+                                ),
+                                onPressed: bState.canBreakIn
+                                    ? () => Navigator.pop(context, 'break_end')
+                                    : null,
+                                child: Text(
+                                  AppLanguage.tr(
+                                    'attendance.fingerprint.break_out',
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (bState.hint != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              bState.hint!,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.orange.shade700,
+                              ),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
-    if (picked != null && mounted) setState(() => _attendanceMode = picked);
+
+    if (pickedMode != null && mounted) {
+      setState(() => _attendanceMode = pickedMode);
+
+      String typeDisplay;
+      switch (pickedMode) {
+        case 'check_in':
+          typeDisplay = 'IN';
+          break;
+        case 'check_out':
+          typeDisplay = 'OUT';
+          break;
+        case 'break_start':
+          typeDisplay = 'ISTIRAHAT MASUK';
+          break;
+        case 'break_end':
+          typeDisplay = 'ISTIRAHAT KELUAR';
+          break;
+        default:
+          typeDisplay = pickedMode;
+      }
+      _showDuplicateOverlay("Mode set: $typeDisplay");
+    }
   }
 }
 

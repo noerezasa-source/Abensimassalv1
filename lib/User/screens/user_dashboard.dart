@@ -18,12 +18,14 @@ import '../../helpers/language_helper.dart';
 class UserDashboardPage extends StatefulWidget {
   final int organizationMemberId;
   final Map<String, dynamic> memberData;
+  final Map<String, dynamic>? userProfile;
   final bool isDarkMode;
 
   const UserDashboardPage({
     super.key,
     required this.organizationMemberId,
     required this.memberData,
+    this.userProfile,
     this.isDarkMode = false,
   });
 
@@ -67,6 +69,7 @@ class _UserDashboardPageState extends State<UserDashboardPage>
   void initState() {
     super.initState();
     _isDarkMode = widget.isDarkMode;
+    _userProfile = widget.userProfile;
     _tabController = TabController(length: 2, vsync: this);
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) {
@@ -146,49 +149,49 @@ class _UserDashboardPageState extends State<UserDashboardPage>
     }
   }
 
-  void _showOrganizationSwitcher() {
-    showModalBottomSheet(
+  Future<void> _showOrganizationSwitcher() async {
+    final selectedMembership = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (context) => _buildOrganizationSwitcherSheet(),
-    ).then((selectedMembership) {
-      if (selectedMembership != null &&
-          selectedMembership is Map<String, dynamic>) {
-        // Double check if it's the SAME organization
-        if (selectedMembership['id'] == widget.organizationMemberId) {
-          debugPrint('Already on this organization dashboard');
-          return;
-        }
+    );
 
-        // Navigate based on role
-        if (_roleService.isPetugas(selectedMembership)) {
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(
-              builder: (context) => PetugasDashboardPage(
-                organizationMemberId: selectedMembership['id'] as int,
-                memberData: selectedMembership,
-                isDarkMode: _isDarkMode,
-              ),
-            ),
-            (route) => false,
-          );
-        } else {
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(
-              builder: (context) => UserDashboardPage(
-                organizationMemberId: selectedMembership['id'] as int,
-                memberData: selectedMembership,
-                isDarkMode: _isDarkMode,
-              ),
-            ),
-            (route) => false,
-          );
-        }
-      }
-    });
+    if (!mounted) return;
+    if (selectedMembership == null) return;
+
+    // Skip jika sudah di organisasi yang sama
+    if (selectedMembership['id'] == widget.organizationMemberId) {
+      debugPrint('Already on this organization dashboard');
+      return;
+    }
+
+    // Navigasi berdasarkan role — dilakukan di context dashboard (valid)
+    if (_roleService.isPetugas(selectedMembership)) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(
+          builder: (context) => PetugasDashboardPage(
+            organizationMemberId: selectedMembership['id'] as int,
+            memberData: selectedMembership,
+            isDarkMode: _isDarkMode,
+          ),
+        ),
+        (route) => false,
+      );
+    } else {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(
+          builder: (context) => UserDashboardPage(
+            organizationMemberId: selectedMembership['id'] as int,
+            memberData: selectedMembership,
+            isDarkMode: _isDarkMode,
+          ),
+        ),
+        (route) => false,
+      );
+    }
   }
 
   Widget _buildOrganizationSwitcherSheet() {
@@ -523,6 +526,7 @@ class _UserDashboardPageState extends State<UserDashboardPage>
   }
 
   Future<void> _loadAttendanceData(DateTime focusedMonth) async {
+    _loadUserProfile(); // ✅ Added to ensure profile is updated
     setState(() {
       _isLoadingAttendance = true;
     });
@@ -848,24 +852,31 @@ class _UserDashboardPageState extends State<UserDashboardPage>
     return '$firstName $lastName'.trim();
   }
 
+  String? _resolveProfilePhotoUrl(String? storedPath) {
+    if (storedPath == null || storedPath.trim().isEmpty) return null;
+    if (storedPath.startsWith('http://') || storedPath.startsWith('https://')) {
+      return storedPath;
+    }
+
+    final normalizedPath = storedPath.startsWith('mass-profile/')
+        ? storedPath
+        : 'mass-profile/$storedPath';
+
+    try {
+      return Supabase.instance.client.storage
+          .from('profile-photos')
+          .getPublicUrl(normalizedPath);
+    } catch (_) {
+      return null;
+    }
+  }
+
   String? _getProfilePhotoUrl() {
-    if (_userProfile == null || _userProfile!['profile_photo_url'] == null) {
-      return null;
-    }
+    final profile = _userProfile ?? widget.userProfile;
+    if (profile == null) return null;
 
-    final photoPath = _userProfile!['profile_photo_url'] as String;
-
-    if (photoPath.trim().isEmpty) {
-      return null;
-    }
-
-    if (photoPath.startsWith('http://') || photoPath.startsWith('https://')) {
-      return photoPath;
-    }
-
-    return _supabase.storage
-        .from('profile-photos')
-        .getPublicUrl('mass-profile/$photoPath');
+    final photoPath = profile['profile_photo_url'] as String?;
+    return _resolveProfilePhotoUrl(photoPath);
   }
 
   List<Map<String, dynamic>> _getEventsForDay(DateTime day) {
@@ -1325,16 +1336,21 @@ class _UserDashboardPageState extends State<UserDashboardPage>
                               ),
                               child: ClipOval(
                                 child: _getProfilePhotoUrl() != null
-                                    ? Image.network(
-                                        _getProfilePhotoUrl()!,
+                                    ? CachedNetworkImage(
+                                        imageUrl: _getProfilePhotoUrl()!,
                                         fit: BoxFit.cover,
-                                        errorBuilder:
-                                            (context, error, stackTrace) =>
-                                                const Icon(
-                                                  Icons.person,
-                                                  size: 60,
-                                                  color: Colors.white,
-                                                ),
+                                        placeholder: (context, url) =>
+                                            const Icon(
+                                              Icons.person,
+                                              size: 60,
+                                              color: Colors.white70,
+                                            ),
+                                        errorWidget: (context, url, error) =>
+                                            const Icon(
+                                              Icons.person,
+                                              size: 60,
+                                              color: Colors.white,
+                                            ),
                                       )
                                     : const Icon(
                                         Icons.person,

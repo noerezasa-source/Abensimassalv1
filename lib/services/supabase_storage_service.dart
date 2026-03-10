@@ -19,16 +19,14 @@ class SupabaseStorageService {
 
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final fileName = '${organizationMemberId}_${type}_$timestamp.jpg';
-      
+
       // Path dengan user ID di depan untuk RLS policy
       final filePath = '${user.id}/$fileName';
       const bucketName = 'photo-attendance';
 
       debugPrint('Uploading to bucket: $bucketName, path: $filePath');
 
-      await _supabase.storage
-          .from(bucketName)
-          .upload(filePath, imageFile);
+      await _supabase.storage.from(bucketName).upload(filePath, imageFile);
 
       final publicUrl = _supabase.storage
           .from(bucketName)
@@ -39,7 +37,9 @@ class SupabaseStorageService {
     } catch (e) {
       debugPrint('SupabaseStorageService Error: $e');
       if (e.toString().contains('Bucket not found')) {
-        debugPrint('⚠️ CRITICAL: Bucket "photo-attendance" not found. Please verify bucket ID in Supabase Storage.');
+        debugPrint(
+          '⚠️ CRITICAL: Bucket "photo-attendance" not found. Please verify bucket ID in Supabase Storage.',
+        );
       }
       throw Exception('Failed to upload attendance photo: $e');
     }
@@ -58,7 +58,7 @@ class SupabaseStorageService {
 
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final fileName = '${organizationMemberId}_template_$timestamp.jpg';
-      
+
       // FIX: Use organizationMemberId folder so photos are grouped by member, not by the petugas who registered them.
       // This assumes RLS allows writing to folders based on member_id (or is public/service role).
       final filePath = '$organizationMemberId/$fileName';

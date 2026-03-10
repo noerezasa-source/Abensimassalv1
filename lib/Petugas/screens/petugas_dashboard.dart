@@ -17,6 +17,7 @@ import 'selfie_attendance_flow_page.dart';
 import '../../attendance/screens/fingerprint_attendance_page.dart';
 import '../../auth/screens/join_organization_screen.dart'; // ✅ Added for Join Organization option
 import '../../helpers/language_helper.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 class PetugasDashboardPage extends StatefulWidget {
   final int organizationMemberId;
@@ -150,7 +151,8 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
   }
 
   Future<void> _loadUserProfile() async {
-    if (_userProfile != null) return;
+    // Refresh fully from DB to ensure we have all fields (like profile_photo_url)
+    // even if partial data was passed via widget.userProfile.
 
     try {
       final userId = _supabase.auth.currentUser?.id;
@@ -309,6 +311,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
 
   Future<void> _refreshAll() async {
     debugPrint('=== REFRESHING ALL DATA ===');
+    _loadUserProfile(); // ✅ Added to ensure profile is updated
     _loadTodayStats();
     _loadRecentActivities();
     _loadWeeklyOverview();
@@ -724,12 +727,48 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
   }
 
   Future<void> _showOrganizationSwitcher() async {
-    showModalBottomSheet(
+    final selectedMembership = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (context) => _buildOrganizationSwitcherSheet(),
     );
+
+    if (!mounted) return;
+    if (selectedMembership == null) return;
+
+    // Skip jika sudah di organisasi yang sama
+    if (selectedMembership['id'] == widget.organizationMemberId) return;
+
+    // Navigasi berdasarkan role — dilakukan di context dashboard (valid)
+    if (_roleService.isPetugas(selectedMembership)) {
+      Navigator.pushReplacement(
+        context,
+        PageRouteBuilder(
+          pageBuilder: (context, animation, secondaryAnimation) =>
+              PetugasDashboardPage(
+                organizationMemberId: selectedMembership['id'] as int,
+                memberData: selectedMembership,
+                userProfile: _userProfile,
+                isDarkMode: _isDarkMode,
+              ),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+        ),
+      );
+    } else {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => UserDashboardPage(
+            organizationMemberId: selectedMembership['id'] as int,
+            memberData: selectedMembership,
+            isDarkMode: _isDarkMode,
+          ),
+        ),
+      );
+    }
   }
 
   Widget _buildOrganizationSwitcherSheet() {
@@ -795,51 +834,8 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 12),
                       child: InkWell(
-                        onTap: () {
-                          Navigator.pop(context); // Close switcher
-                          if (isActive) return;
-
-                          // Navigate to new dashboard based on role
-                          if (_roleService.isPetugas(membership)) {
-                            Navigator.pushReplacement(
-                              context,
-                              PageRouteBuilder(
-                                pageBuilder:
-                                    (context, animation, secondaryAnimation) =>
-                                        PetugasDashboardPage(
-                                          organizationMemberId:
-                                              membership['id'] as int,
-                                          memberData: membership,
-                                          userProfile: _userProfile,
-                                          isDarkMode: _isDarkMode,
-                                        ),
-                                transitionsBuilder:
-                                    (
-                                      context,
-                                      animation,
-                                      secondaryAnimation,
-                                      child,
-                                    ) {
-                                      return FadeTransition(
-                                        opacity: animation,
-                                        child: child,
-                                      );
-                                    },
-                              ),
-                            );
-                          } else {
-                            Navigator.pushReplacement(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => UserDashboardPage(
-                                  organizationMemberId: membership['id'] as int,
-                                  memberData: membership,
-                                  isDarkMode: _isDarkMode,
-                                ),
-                              ),
-                            );
-                          }
-                        },
+                        // Kembalikan membership ke .then() di _showOrganizationSwitcher
+                        onTap: () => Navigator.pop(context, membership),
                         borderRadius: BorderRadius.circular(16),
                         child: Container(
                           padding: const EdgeInsets.all(16),
@@ -1090,23 +1086,10 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
 
   String? _getProfilePhotoUrl() {
     final profile = _userProfile ?? widget.userProfile;
-    if (profile == null || profile['profile_photo_url'] == null) {
-      return null;
-    }
+    if (profile == null) return null;
 
-    final photoPath = profile['profile_photo_url'] as String;
-
-    if (photoPath.trim().isEmpty) {
-      return null;
-    }
-
-    if (photoPath.startsWith('http://') || photoPath.startsWith('https://')) {
-      return photoPath;
-    }
-
-    return _supabase.storage
-        .from('profile-photos')
-        .getPublicUrl('mass-profile/$photoPath');
+    final photoPath = profile['profile_photo_url'] as String?;
+    return _resolveProfilePhotoUrl(photoPath);
   }
 
   String _formatEventType(String? type) {
@@ -1272,17 +1255,21 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                                     ),
                                   ),
                                   child: _getProfilePhotoUrl() != null
-                                      ? Image.network(
-                                          _getProfilePhotoUrl()!,
+                                      ? CachedNetworkImage(
+                                          imageUrl: _getProfilePhotoUrl()!,
                                           fit: BoxFit.cover,
-                                          errorBuilder:
-                                              (context, error, stackTrace) {
-                                                return const Icon(
-                                                  Icons.person,
-                                                  size: 60,
-                                                  color: Colors.white,
-                                                );
-                                              },
+                                          placeholder: (context, url) =>
+                                              const Icon(
+                                                Icons.person,
+                                                size: 60,
+                                                color: Colors.white70,
+                                              ),
+                                          errorWidget: (context, url, error) =>
+                                              const Icon(
+                                                Icons.person,
+                                                size: 60,
+                                                color: Colors.white,
+                                              ),
                                         )
                                       : const Icon(
                                           Icons.person,

@@ -391,7 +391,7 @@ class _FaceAttendanceMultiUserPageState
         }
       }
 
-      final record = OfflineAttendance(
+      OfflineAttendance record = OfflineAttendance(
         cardNumber: 'FACE_$memberId',
         faceEmbedding: jsonEncode(template),
         eventType: attendanceType,
@@ -408,7 +408,62 @@ class _FaceAttendanceMultiUserPageState
         isSynced: false,
       );
 
-      return await _offlineDb.insertAttendance(record);
+      // Try online first if connected
+      bool syncSuccess = false;
+      if (_isOnline) {
+        try {
+          final rawData = {
+            'face_recognition': true,
+            'work_time_mode': modeToSave,
+            'synced_from_offline': false,
+          };
+
+          if (attendanceType == 'check_in') {
+            await _attendanceService.checkIn(
+              organizationMemberId: memberId,
+              method: 'face_recognition',
+              photoUrl: '', // Face recognition uses embeddings
+              rawData: rawData,
+            );
+          } else if (attendanceType == 'check_out') {
+            await _attendanceService.checkOut(
+              organizationMemberId: memberId,
+              method: 'face_recognition',
+              photoUrl: '',
+              rawData: rawData,
+            );
+          } else if (attendanceType == 'break_out' ||
+              attendanceType == 'break_start') {
+            await _attendanceService.breakOut(
+              organizationMemberId: memberId,
+              method: 'face_recognition',
+              photoUrl: '',
+              rawData: rawData,
+            );
+          } else if (attendanceType == 'break_in' ||
+              attendanceType == 'break_end') {
+            await _attendanceService.breakIn(
+              organizationMemberId: memberId,
+              method: 'face_recognition',
+              photoUrl: '',
+              rawData: rawData,
+            );
+          }
+          syncSuccess = true;
+          debugPrint('✅ Online face attendance recorded for $userName');
+        } catch (e) {
+          debugPrint('⚠️ Online face failed, preserving for offline sync: $e');
+        }
+      }
+
+      record = record.copyWith(isSynced: syncSuccess);
+      final id = await _offlineDb.insertAttendance(record);
+
+      // Trigger background sync if not already successful
+      if (!syncSuccess) {
+        AttendanceSyncService().syncPendingAttendances();
+      }
+      return id;
     } catch (e) {
       debugPrint('Failed to save offline attendance: $e');
       return null;
@@ -554,11 +609,12 @@ class _FaceAttendanceMultiUserPageState
   }
 
   Future<void> _loadOrganizationData() async {
+    final orgId = widget.organizationId;
     try {
       final org = await _supabase
           .from('organizations')
           .select('timezone, name')
-          .eq('id', widget.organizationId)
+          .eq('id', orgId)
           .maybeSingle();
 
       if (org != null && mounted) {
@@ -566,14 +622,36 @@ class _FaceAttendanceMultiUserPageState
           _organizationTimezone = org['timezone'] as String? ?? 'Asia/Jakarta';
           _organizationName = org['name'] as String? ?? '';
         });
-      }
 
+        // Cache for offline use
+        await _offlineDb.cacheOrganizationData({
+          'id': orgId,
+          'name': _organizationName,
+          'timezone': _organizationTimezone,
+        });
+      }
+    } catch (e) {
+      debugPrint('🌐 Offline/Error loading org data: $e');
+
+      // Try fallback from cache
+      final cachedOrg = await _offlineDb.getOrganizationData(orgId);
+      if (cachedOrg != null && mounted) {
+        setState(() {
+          _organizationTimezone =
+              cachedOrg['timezone'] as String? ?? 'Asia/Jakarta';
+          _organizationName = cachedOrg['name'] as String? ?? '';
+        });
+        debugPrint('💾 Using cached organization data');
+      }
+    }
+
+    try {
       final userId = _supabase.auth.currentUser?.id;
       if (userId != null) {
         final member = await _supabase
             .from('organization_members')
             .select('id')
-            .eq('organization_id', widget.organizationId)
+            .eq('organization_id', orgId)
             .eq('user_id', userId)
             .eq('is_active', true)
             .maybeSingle();
@@ -589,7 +667,29 @@ class _FaceAttendanceMultiUserPageState
         }
       }
     } catch (e) {
-      debugPrint('Error loading org data: $e');
+      debugPrint('🌐 Offline/Error finding member ID: $e');
+
+      // Fallback from cache
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId != null) {
+        final cachedMembers = await _offlineDb.getOrganizationMembers(orgId);
+        if (cachedMembers != null) {
+          final member = cachedMembers.firstWhere(
+            (m) => m['user_id'] == userId,
+            orElse: () => <String, dynamic>{}, // explicit type
+          );
+          if (member.isNotEmpty && member['id'] != null) {
+            final memberId = member['id'] as int;
+            if (mounted) {
+              setState(() {
+                _organizationMemberId = memberId;
+              });
+            }
+            debugPrint('💾 Using cached admin member ID: $memberId');
+            // Can't reliably load schedule offline yet unless cached, but at least manual button works
+          }
+        }
+      }
     }
   }
 
@@ -1546,13 +1646,15 @@ class _FaceAttendanceMultiUserPageState
           .limit(1)
           .maybeSingle();
 
-      if (schedule != null) {
+      if (schedule != null && mounted) {
         setState(() {
           _memberSchedule = schedule;
         });
       }
     } catch (e) {
-      debugPrint('Error loading schedule: $e');
+      debugPrint('🌐 Offline/Error loading member schedule: $e');
+      // No explicit fallback here because getTodaySchedule in _loadDailySchedule
+      // already handles the complex daily fallback logic.
     }
   }
 
@@ -1647,12 +1749,15 @@ class _FaceAttendanceMultiUserPageState
 
   // Reverting to dynamic shift selector based on User Request
   Future<void> _loadAvailableModes() async {
+    if (_isLoadingModes) return;
+    final orgId = widget.organizationId;
+
     setState(() => _isLoadingModes = true);
     try {
       final modes = await _supabase
           .from('shifts')
           .select('id, code, name, start_time, end_time, description')
-          .eq('organization_id', widget.organizationId)
+          .eq('organization_id', orgId)
           .eq('is_active', true)
           .order('name', ascending: true);
 
@@ -1660,16 +1765,24 @@ class _FaceAttendanceMultiUserPageState
         setState(() {
           _availableModes = List<Map<String, dynamic>>.from(modes);
         });
+
+        // Cache shifts for offline use
+        await _offlineDb.cacheShifts(orgId, _availableModes);
       }
     } catch (e) {
-      debugPrint('Error loading modes: $e');
+      debugPrint('🌐 Offline/Error loading modes result: $e');
+
+      // Fallback to cache
+      final cachedShifts = await _offlineDb.getShifts(orgId);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Gagal memuat mode: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        setState(() {
+          _availableModes = List<Map<String, dynamic>>.from(cachedShifts);
+        });
+        if (_availableModes.isNotEmpty) {
+          debugPrint(
+            '💾 Using cached shifts (${_availableModes.length} found)',
+          );
+        }
       }
     } finally {
       if (mounted) setState(() => _isLoadingModes = false);
@@ -2226,6 +2339,8 @@ class _FaceAttendanceMultiUserPageState
                               memberData: {
                                 'organization_id': widget.organizationId,
                               },
+                              sourceMode: 'face_recognition_kiosk',
+                              initialShiftName: _workTimeMode,
                             ),
                           ),
                         );

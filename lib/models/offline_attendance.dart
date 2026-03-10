@@ -20,6 +20,7 @@ class OfflineAttendance {
   final String? userName; // For display
   final bool isSynced;
   final String? syncError;
+  final String? notes; // Added for manual attendance notes
   final DateTime createdAt;
 
   OfflineAttendance({
@@ -39,6 +40,7 @@ class OfflineAttendance {
     this.userName,
     this.isSynced = false,
     this.syncError,
+    this.notes,
     DateTime? createdAt,
   }) : createdAt = createdAt ?? DateTime.now().toUtc();
 
@@ -60,6 +62,7 @@ class OfflineAttendance {
       'user_name': userName,
       'is_synced': isSynced ? 1 : 0,
       'sync_error': syncError,
+      'notes': notes,
       'created_at': TimezoneHelper.formatUtcForSupabase(createdAt),
     };
   }
@@ -82,6 +85,7 @@ class OfflineAttendance {
       userName: map['user_name'] as String?,
       isSynced: (map['is_synced'] as int) == 1,
       syncError: map['sync_error'] as String?,
+      notes: map['notes'] as String?,
       createdAt: DateTime.parse(map['created_at'] as String),
     );
   }
@@ -103,6 +107,7 @@ class OfflineAttendance {
     String? userName,
     bool? isSynced,
     String? syncError,
+    String? notes,
     DateTime? createdAt,
   }) {
     return OfflineAttendance(
@@ -122,6 +127,7 @@ class OfflineAttendance {
       userName: userName ?? this.userName,
       isSynced: isSynced ?? this.isSynced,
       syncError: syncError ?? this.syncError,
+      notes: notes ?? this.notes,
       createdAt: createdAt ?? this.createdAt,
     );
   }

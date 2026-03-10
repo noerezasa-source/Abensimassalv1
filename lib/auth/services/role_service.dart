@@ -172,7 +172,6 @@ class RoleService {
               id,
               display_name,
               first_name,
-              middle_name,
               last_name,
               profile_photo_url
             )

@@ -96,9 +96,6 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted && _isOnline) {
           _cacheMemberData();
-        } else {
-          // Load offline attendance data when offline
-          _loadOfflineAttendanceData();
         }
       });
 
@@ -117,10 +114,10 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
       _isOnline = isOnline;
     });
 
-    // Load offline data if offline
-    if (!isOnline) {
-      _loadOfflineAttendanceData();
-    }
+    // Load offline data if offline (Removed per user request to start empty)
+    // if (!isOnline) {
+    //   _loadOfflineAttendanceData();
+    // }
 
     Connectivity().onConnectivityChanged.listen((results) {
       if (mounted) {
@@ -131,9 +128,10 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         if (isOnlineNow) {
           _loadPendingSyncCount();
           _cacheMemberData(); // Cache member data when coming online
-        } else {
-          _loadOfflineAttendanceData(); // Load offline data when going offline
         }
+        // else {
+        //   _loadOfflineAttendanceData(); // Load offline data when going offline
+        // }
       }
     });
   }
@@ -144,98 +142,6 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
       setState(() {
         _pendingSyncCount = count;
       });
-    }
-  }
-
-  Future<void> _loadOfflineAttendanceData() async {
-    try {
-      final offlineAttendances = await _offlineDb.getAllAttendances(limit: 100);
-
-      if (mounted && offlineAttendances.isNotEmpty) {
-        final List<_AttendanceEntry> loadedEntries = [];
-
-        for (final attendance in offlineAttendances) {
-          // Find member data from cache
-          final orgId = _organizationId;
-          if (orgId == null) continue;
-
-          final cardData = await _offlineDb.findMemberByCardInCache(
-            attendance.cardNumber,
-            orgId,
-          );
-
-          Map<String, dynamic> memberInfo = {};
-          int? memberId;
-
-          if (cardData != null) {
-            memberInfo =
-                cardData['organization_members'] as Map<String, dynamic>? ?? {};
-            memberId =
-                cardData['organization_member_id'] as int? ??
-                memberInfo['id'] as int?;
-
-            // If user_profiles is missing or empty, but we have userName from attendance, use it
-            final profile =
-                memberInfo['user_profiles'] as Map<String, dynamic>?;
-            if ((profile == null || profile.isEmpty) &&
-                attendance.userName != null &&
-                attendance.userName!.isNotEmpty) {
-              final userName = attendance.userName!;
-              final nameParts = userName.split(' ');
-              memberInfo['user_profiles'] = {
-                'display_name': userName,
-                'first_name': nameParts.isNotEmpty ? nameParts.first : '',
-                'last_name': nameParts.length > 1
-                    ? nameParts.sublist(1).join(' ')
-                    : '',
-              };
-            }
-          } else {
-            // If cardData not found but we have userName from attendance, create minimal memberInfo
-            if (attendance.userName != null &&
-                attendance.userName!.isNotEmpty) {
-              final userName = attendance.userName!;
-              final nameParts = userName.split(' ');
-              memberInfo = {
-                'user_profiles': {
-                  'display_name': userName,
-                  'first_name': nameParts.isNotEmpty ? nameParts.first : '',
-                  'last_name': nameParts.length > 1
-                      ? nameParts.sublist(1).join(' ')
-                      : '',
-                },
-              };
-              memberId = attendance.organizationMemberId;
-            }
-          }
-
-          // Use organizationMemberId from attendance if available
-          if (memberId == null && attendance.organizationMemberId != null) {
-            memberId = attendance.organizationMemberId;
-          }
-
-          if (memberId != null) {
-            final timestamp = DateTime.parse(attendance.timestamp);
-            loadedEntries.add(
-              _AttendanceEntry(
-                memberId: memberId,
-                memberInfo: memberInfo,
-                cardNumber: attendance.cardNumber,
-                action: attendance.eventType,
-                timestamp: timestamp,
-                workTimeMode: attendance.workTimeMode,
-              ),
-            );
-          }
-        }
-
-        setState(() {
-          _entries.clear();
-          _entries.addAll(loadedEntries);
-        });
-      }
-    } catch (e) {
-      debugPrint('Error loading offline attendance data: $e');
     }
   }
 
@@ -385,16 +291,17 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
           .limit(1)
           .maybeSingle();
 
-      if (schedule != null) {
+      if (schedule != null && mounted) {
         setState(() {
           _memberSchedule = schedule;
         });
       }
 
       // 2. Load the full DailySchedule via service for break time validation
+      // AttendanceService.getTodaySchedule already handles offline cache internally.
       final dailySched = await _attendanceService.getTodaySchedule(
         widget.organizationMemberId,
-        organizationTimezone: 'Asia/Jakarta',
+        organizationTimezone: _organizationTimezone,
       );
 
       if (mounted) {
@@ -405,7 +312,22 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         });
       }
     } catch (e) {
-      debugPrint('Error loading schedule: $e');
+      debugPrint('🌐 Offline/Error loading schedule: $e');
+
+      // Try fetching from cache via AttendanceService even on exception
+      try {
+        final dailySched = await _attendanceService.getTodaySchedule(
+          widget.organizationMemberId,
+          organizationTimezone: _organizationTimezone,
+        );
+        if (mounted) {
+          setState(() {
+            _dailySchedule = dailySched;
+            _updateModeBasedOnSchedule();
+          });
+          debugPrint('💾 Using cached daily schedule via service');
+        }
+      } catch (_) {}
     }
   }
 
@@ -497,20 +419,28 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
           .eq('is_active', true)
           .order('name', ascending: true);
 
-      setState(() {
-        _availableModes = List<Map<String, dynamic>>.from(modes);
-      });
-    } catch (e) {
-      debugPrint('Error loading modes: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '${AppLanguage.tr('attendance.rfid.gagal_memuat_mode')}: $e',
-            ),
-            backgroundColor: Colors.red,
-          ),
-        );
+        setState(() {
+          _availableModes = List<Map<String, dynamic>>.from(modes);
+        });
+
+        // Cache shifts for offline use
+        await _offlineDb.cacheShifts(orgId, _availableModes);
+      }
+    } catch (e) {
+      debugPrint('🌐 Offline/Error loading modes: $e');
+
+      // Fallback to cache
+      final cachedShifts = await _offlineDb.getShifts(orgId);
+      if (mounted) {
+        setState(() {
+          _availableModes = List<Map<String, dynamic>>.from(cachedShifts);
+        });
+        if (_availableModes.isNotEmpty) {
+          debugPrint(
+            '💾 Using cached shifts (${_availableModes.length} found)',
+          );
+        }
       }
     } finally {
       if (mounted) {
@@ -914,13 +844,35 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
           _organizationName = org['name'] as String? ?? '';
         });
 
+        // Cache for offline use
+        await _offlineDb.cacheOrganizationData({
+          'id': orgId,
+          'name': _organizationName,
+          'timezone': _organizationTimezone,
+        });
+
         // Re-calculate auto-selection now that we have the correct timezone
         if (mounted) {
           _updateModeBasedOnSchedule();
         }
       }
     } catch (e) {
-      debugPrint('Error loading org data: $e');
+      debugPrint('🌐 Offline/Error loading org data: $e');
+
+      // Try fallback from cache
+      final cachedOrg = await _offlineDb.getOrganizationData(orgId);
+      if (cachedOrg != null && mounted) {
+        setState(() {
+          _organizationTimezone =
+              cachedOrg['timezone'] as String? ?? 'Asia/Jakarta';
+          _organizationName = cachedOrg['name'] as String? ?? '';
+        });
+        debugPrint('💾 Using cached organization data');
+
+        if (mounted) {
+          _updateModeBasedOnSchedule();
+        }
+      }
     }
   }
 
@@ -1278,9 +1230,9 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         );
       }
 
-      // 2. Save to offline database
-      debugPrint('💾 Background saving attendance: $userName ($action)');
-      final offlineAttendance = OfflineAttendance(
+      // 2. Prepare local record
+      debugPrint('💾 Background processing attendance: $userName ($action)');
+      OfflineAttendance offlineAttendance = OfflineAttendance(
         cardNumber: cardNumber,
         eventType: action,
         method: 'rfid_card_mobile',
@@ -1288,11 +1240,66 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
         workTimeMode: workTimeMode,
         organizationMemberId: memberId,
         userName: userName,
+        isSynced: false,
       );
 
+      // 3. Try online first if connected
+      bool syncSuccess = false;
+      if (_isOnline) {
+        try {
+          final rawData = {
+            'card_number': cardNumber,
+            'work_time_mode': workTimeMode,
+            'synced_from_offline': false,
+          };
+
+          if (action == 'check_in') {
+            await _attendanceService.checkIn(
+              organizationMemberId: memberId,
+              method: 'rfid_card_mobile',
+              photoUrl: '', // RFID doesn't use photo
+              rawData: rawData,
+            );
+          } else if (action == 'check_out') {
+            await _attendanceService.checkOut(
+              organizationMemberId: memberId,
+              method: 'rfid_card_mobile',
+              photoUrl: '', // RFID doesn't use photo
+              rawData: rawData,
+            );
+          } else if (action == 'break_out' || action == 'break_start') {
+            await _attendanceService.breakOut(
+              organizationMemberId: memberId,
+              method: 'rfid_card_mobile',
+              photoUrl: '', // RFID doesn't use photo
+              rawData: rawData,
+            );
+          } else if (action == 'break_in' || action == 'break_end') {
+            await _attendanceService.breakIn(
+              organizationMemberId: memberId,
+              method: 'rfid_card_mobile',
+              photoUrl: '', // RFID doesn't use photo
+              rawData: rawData,
+            );
+          }
+          syncSuccess = true;
+          debugPrint('✅ Online rfid attendance recorded for $userName');
+        } catch (e) {
+          debugPrint('⚠️ Online rfid failed, preserving for offline sync: $e');
+        }
+      }
+
+      // 4. Save to local DB (mark as synced if online was successful)
+      offlineAttendance = offlineAttendance.copyWith(isSynced: syncSuccess);
       await _offlineDb.insertAttendance(offlineAttendance);
+
+      // 5. If it was an offline save, trigger sync service to handle any queue
+      if (!syncSuccess) {
+        AttendanceSyncService().syncPendingAttendances();
+      }
+
       await _loadPendingSyncCount();
-      debugPrint('✅ Background save complete for $userName');
+      debugPrint('✅ Background processing complete for $userName');
     } catch (e) {
       debugPrint('❌ Background processing error: $e');
     }

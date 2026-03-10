@@ -105,9 +105,19 @@ class TimezoneHelper {
   /// Get current date in organization timezone (YYYY-MM-DD)
   /// This determines what "today" means for the organization
   static String getCurrentDateInOrgTimezone(String organizationTimezone) {
-    final nowInOrgTz = getCurrentTimeInOrgTimezone(organizationTimezone);
+    return getDateInOrgTimezone(DateTime.now(), organizationTimezone);
+  }
 
-    return '${nowInOrgTz.year}-${nowInOrgTz.month.toString().padLeft(2, '0')}-${nowInOrgTz.day.toString().padLeft(2, '0')}';
+  /// Get date for a specific UTC time in organization timezone (YYYY-MM-DD)
+  static String getDateInOrgTimezone(
+    DateTime utcTime,
+    String organizationTimezone,
+  ) {
+    final timeInOrgTz = convertUtcToOrgTimezone(
+      utcTime.toUtc(),
+      organizationTimezone,
+    );
+    return '${timeInOrgTz.year}-${timeInOrgTz.month.toString().padLeft(2, '0')}-${timeInOrgTz.day.toString().padLeft(2, '0')}';
   }
 
   /// Convert UTC DateTime to organization timezone DateTime

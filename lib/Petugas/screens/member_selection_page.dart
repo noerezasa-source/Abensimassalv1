@@ -111,7 +111,6 @@ class _MemberSelectionPageState extends State<MemberSelectionPage> {
             user_profiles!inner(
               display_name,
               first_name,
-              middle_name,
               last_name,
               profile_photo_url
             ),

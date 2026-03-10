@@ -4,9 +4,11 @@ import 'package:geolocator/geolocator.dart' as geolocator;
 import '../../models/attendance_record.dart';
 import '../../models/work_schedule_models.dart';
 import '../../helpers/timezone_helper.dart';
+import '../../services/offline_database_service.dart';
 
 class AttendanceService {
   final SupabaseClient _supabase = Supabase.instance.client;
+  final OfflineDatabaseService _offlineDb = OfflineDatabaseService();
 
   // -- Schedule Logic Start --
 
@@ -29,17 +31,22 @@ class AttendanceService {
 
       // 1. Check Shift Assignments (Highest Priority)
       // "Is there a specific override for today?"
-      final shiftAssignmentRes = await _supabase
-          .from('shift_assignments')
-          .select('*, shifts(*)')
-          .eq('organization_member_id', organizationMemberId)
-          .eq('assignment_date', dateStr)
-          .maybeSingle();
+      Map<String, dynamic>? shiftAssignmentRes;
+      try {
+        shiftAssignmentRes = await _supabase
+            .from('shift_assignments')
+            .select('*, shifts(*)')
+            .eq('organization_member_id', organizationMemberId)
+            .eq('assignment_date', dateStr)
+            .maybeSingle();
+      } catch (e) {
+        debugPrint('🌐 Offline/Error getting shift assignments: $e');
+      }
 
       if (shiftAssignmentRes != null) {
         final assignment = ShiftAssignment.fromJson(shiftAssignmentRes);
         if (assignment.shift != null) {
-          return DailySchedule(
+          final result = DailySchedule(
             isWorkingDay: true,
             startTime: assignment.shift!.startTime,
             endTime: assignment.shift!.endTime,
@@ -50,22 +57,30 @@ class AttendanceService {
             shiftId: assignment.shift!.id,
             isOvernight: assignment.shift!.overnight,
           );
+          // Cache successful result
+          _offlineDb.cacheSchedule(organizationMemberId, result.toJson());
+          return result;
         }
       }
 
       // 2. Check Member Schedules (Long-term assignment)
       // "What is their regular roster?"
-      final memberScheduleRes = await _supabase
-          .from('member_schedules')
-          .select('*, shifts(*), work_schedules(*)')
-          .eq('organization_member_id', organizationMemberId)
-          .lte('effective_date', dateStr)
-          .or(
-            'end_date.is.null,end_date.gte.$dateStr',
-          ) // Open-ended or valid range
-          .order('effective_date', ascending: false) // Get most recent
-          .limit(1)
-          .maybeSingle();
+      Map<String, dynamic>? memberScheduleRes;
+      try {
+        memberScheduleRes = await _supabase
+            .from('member_schedules')
+            .select('*, shifts(*), work_schedules(*)')
+            .eq('organization_member_id', organizationMemberId)
+            .lte('effective_date', dateStr)
+            .or(
+              'end_date.is.null,end_date.gte.$dateStr',
+            ) // Open-ended or valid range
+            .order('effective_date', ascending: false) // Get most recent
+            .limit(1)
+            .maybeSingle();
+      } catch (e) {
+        debugPrint('🌐 Offline/Error getting member schedules: $e');
+      }
 
       if (memberScheduleRes != null) {
         final memberSchedule = MemberSchedule.fromJson(memberScheduleRes);
@@ -74,7 +89,7 @@ class AttendanceService {
         if (memberSchedule.shiftId != null &&
             memberScheduleRes['shifts'] != null) {
           final shift = Shift.fromJson(memberScheduleRes['shifts']);
-          return DailySchedule(
+          final result = DailySchedule(
             isWorkingDay: true,
             startTime: shift.startTime,
             endTime: shift.endTime,
@@ -85,51 +100,75 @@ class AttendanceService {
             shiftId: shift.id,
             isOvernight: shift.overnight,
           );
+          // Cache successful result
+          _offlineDb.cacheSchedule(organizationMemberId, result.toJson());
+          return result;
         }
 
         // 2b. Assigned to a Work Schedule (e.g. "Regular 9-5", "Roster A")
         if (memberSchedule.workScheduleId != null) {
-          return await _getScheduleDetailForDate(
+          final result = await _getScheduleDetailForDate(
             memberSchedule.workScheduleId!,
             DateTime.parse(dateStr).weekday,
             'member_schedule',
           );
+          // Cache successful result
+          _offlineDb.cacheSchedule(organizationMemberId, result.toJson());
+          return result;
         }
       }
 
       // 3. Check Default Schedule (Fallback)
       // "What is the general office hour?"
-      // Need organization_id. Fetching via member lookup or passing it in would be better.
-      // For now, we query member -> org_id.
-      final memberData = await _supabase
-          .from('organization_members')
-          .select('organization_id')
-          .eq('id', organizationMemberId)
-          .single();
+      try {
+        final memberData = await _supabase
+            .from('organization_members')
+            .select('organization_id')
+            .eq('id', organizationMemberId)
+            .single();
 
-      final organizationId = memberData['organization_id'] as int;
+        final organizationId = memberData['organization_id'] as int;
 
-      final defaultScheduleRes = await _supabase
-          .from('work_schedules')
-          .select()
-          .eq('organization_id', organizationId)
-          .eq('is_default', true)
-          .maybeSingle();
+        final defaultScheduleRes = await _supabase
+            .from('work_schedules')
+            .select()
+            .eq('organization_id', organizationId)
+            .eq('is_default', true)
+            .maybeSingle();
 
-      if (defaultScheduleRes != null) {
-        final schedule = WorkSchedule.fromJson(defaultScheduleRes);
-        return await _getScheduleDetailForDate(
-          schedule.id,
-          DateTime.parse(dateStr).weekday,
-          'default_schedule',
-        );
+        if (defaultScheduleRes != null) {
+          final schedule = WorkSchedule.fromJson(defaultScheduleRes);
+          final result = await _getScheduleDetailForDate(
+            schedule.id,
+            DateTime.parse(dateStr).weekday,
+            'default_schedule',
+          );
+          // Cache successful result
+          _offlineDb.cacheSchedule(organizationMemberId, result.toJson());
+          return result;
+        }
+      } catch (e) {
+        debugPrint('🌐 Offline/Error getting default schedule: $e');
       }
 
-      // 4. No Schedule
+      // 4. No Online Schedule found or Offline -> Try Cache
+      final cached = await _offlineDb.getCachedSchedule(organizationMemberId);
+      if (cached != null) {
+        debugPrint('💾 Using cached schedule for member $organizationMemberId');
+        return DailySchedule.fromJson(cached);
+      }
+
+      // 5. No Schedule
       return DailySchedule.unscheduled();
     } catch (e) {
       debugPrint('⚠️ Error determining schedule: $e');
-      // Fail safe: Allow attendance, but mark error
+
+      // Attempt cache even on unknown error
+      try {
+        final cached = await _offlineDb.getCachedSchedule(organizationMemberId);
+        if (cached != null) return DailySchedule.fromJson(cached);
+      } catch (_) {}
+
       return DailySchedule.unscheduled();
     }
   }
@@ -202,13 +241,19 @@ class AttendanceService {
     int? applicationId,
     Map<String, dynamic>? rawData,
   }) async {
+    debugPrint(
+      '🌐 AttendanceService: Starting online Check-In for member $organizationMemberId',
+    );
     try {
       // Use organization timezone for date calculation, or default to device timezone
       final orgTimezone = organizationTimezone ?? 'Asia/Jakarta';
-      final todayStr = TimezoneHelper.getCurrentDateInOrgTimezone(orgTimezone);
-
       // Get current UTC time (universal, represents "now")
-      final nowUtc = TimezoneHelper.getCurrentUtcTime();
+      // Use offline_timestamp if available for manual sync
+      final nowUtc = (rawData != null && rawData['offline_timestamp'] != null)
+          ? DateTime.parse(rawData['offline_timestamp']).toUtc()
+          : TimezoneHelper.getCurrentUtcTime();
+
+      final todayStr = TimezoneHelper.getDateInOrgTimezone(nowUtc, orgTimezone);
 
       final locationWithPhoto = _decorateLocationWithPhoto(location, photoUrl);
 
@@ -367,8 +412,12 @@ class AttendanceService {
         },
       );
 
+      debugPrint(
+        '✅ AttendanceService: Online Check-In success (Record ID: ${recordData['id']})',
+      );
       return AttendanceRecord.fromJson(recordData);
     } catch (e) {
+      debugPrint('❌ AttendanceService: Online Check-In failed: $e');
       throw Exception('Failed to check in: $e');
     }
   }
@@ -386,13 +435,19 @@ class AttendanceService {
     int? applicationId,
     Map<String, dynamic>? rawData,
   }) async {
+    debugPrint(
+      '🌐 AttendanceService: Starting online Check-Out for member $organizationMemberId',
+    );
     try {
       // Use organization timezone for date calculation, or default to device timezone
       final orgTimezone = organizationTimezone ?? 'Asia/Jakarta';
-      final todayStr = TimezoneHelper.getCurrentDateInOrgTimezone(orgTimezone);
-
       // Get current UTC time (universal, represents "now")
-      final nowUtc = TimezoneHelper.getCurrentUtcTime();
+      // Use offline_timestamp if available for manual sync
+      final nowUtc = (rawData != null && rawData['offline_timestamp'] != null)
+          ? DateTime.parse(rawData['offline_timestamp']).toUtc()
+          : TimezoneHelper.getCurrentUtcTime();
+
+      final todayStr = TimezoneHelper.getDateInOrgTimezone(nowUtc, orgTimezone);
 
       final locationWithPhoto = _decorateLocationWithPhoto(location, photoUrl);
 
@@ -542,8 +597,12 @@ class AttendanceService {
           .eq('id', existingRecord['id'])
           .single();
 
+      debugPrint(
+        '✅ AttendanceService: Online Check-Out success (Record ID: ${updatedRecord['id']})',
+      );
       return AttendanceRecord.fromJson(updatedRecord);
     } catch (e) {
+      debugPrint('❌ AttendanceService: Online Check-Out failed: $e');
       throw Exception('Failed to check out: $e');
     }
   }
@@ -561,10 +620,19 @@ class AttendanceService {
     int? applicationId,
     Map<String, dynamic>? rawData,
   }) async {
+    debugPrint(
+      '🌐 AttendanceService: Starting online Break-Out for member $organizationMemberId',
+    );
     try {
       final orgTimezone = organizationTimezone ?? 'Asia/Jakarta';
-      final todayStr = TimezoneHelper.getCurrentDateInOrgTimezone(orgTimezone);
-      final nowUtc = TimezoneHelper.getCurrentUtcTime();
+
+      // Use offline_timestamp if available for manual sync
+      final nowUtc = (rawData != null && rawData['offline_timestamp'] != null)
+          ? DateTime.parse(rawData['offline_timestamp']).toUtc()
+          : TimezoneHelper.getCurrentUtcTime();
+
+      final todayStr = TimezoneHelper.getDateInOrgTimezone(nowUtc, orgTimezone);
+
       final locationWithPhoto = _decorateLocationWithPhoto(location, photoUrl);
 
       // Find record for today
@@ -614,8 +682,10 @@ class AttendanceService {
           .eq('id', existingRecord['id'])
           .single();
 
+      debugPrint('✅ AttendanceService: Online Break-Out success');
       return AttendanceRecord.fromJson(updatedRecord);
     } catch (e) {
+      debugPrint('❌ AttendanceService: Online Break-Out failed: $e');
       throw Exception('Failed to record break out: $e');
     }
   }
@@ -633,10 +703,19 @@ class AttendanceService {
     int? applicationId,
     Map<String, dynamic>? rawData,
   }) async {
+    debugPrint(
+      '🌐 AttendanceService: Starting online Break-In for member $organizationMemberId',
+    );
     try {
       final orgTimezone = organizationTimezone ?? 'Asia/Jakarta';
-      final todayStr = TimezoneHelper.getCurrentDateInOrgTimezone(orgTimezone);
-      final nowUtc = TimezoneHelper.getCurrentUtcTime();
+
+      // Use offline_timestamp if available for manual sync
+      final nowUtc = (rawData != null && rawData['offline_timestamp'] != null)
+          ? DateTime.parse(rawData['offline_timestamp']).toUtc()
+          : TimezoneHelper.getCurrentUtcTime();
+
+      final todayStr = TimezoneHelper.getDateInOrgTimezone(nowUtc, orgTimezone);
+
       final locationWithPhoto = _decorateLocationWithPhoto(location, photoUrl);
 
       // Find record for today
@@ -686,8 +765,10 @@ class AttendanceService {
           .eq('id', existingRecord['id'])
           .single();
 
+      debugPrint('✅ AttendanceService: Online Break-In success');
       return AttendanceRecord.fromJson(updatedRecord);
     } catch (e) {
+      debugPrint('❌ AttendanceService: Online Break-In failed: $e');
       throw Exception('Failed to record break in: $e');
     }
   }
@@ -890,7 +971,6 @@ class AttendanceService {
             user_profiles!inner(
               display_name,
               first_name,
-              middle_name,
               last_name,
               profile_photo_url
             ),

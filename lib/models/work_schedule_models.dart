@@ -218,6 +218,36 @@ class DailySchedule {
     this.isOvernight = false,
   });
 
+  factory DailySchedule.fromJson(Map<String, dynamic> json) {
+    return DailySchedule(
+      isWorkingDay: json['is_working_day'] ?? true,
+      startTime: json['start_time'],
+      endTime: json['end_time'],
+      breakStart: json['break_start'],
+      breakEnd: json['break_end'],
+      source: json['source'] ?? 'none',
+      scheduleName: json['schedule_name'],
+      shiftId: json['shift_id'],
+      workScheduleId: json['work_schedule_id'],
+      isOvernight: json['is_overnight'] ?? false,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'is_working_day': isWorkingDay,
+      'start_time': startTime,
+      'end_time': endTime,
+      'break_start': breakStart,
+      'break_end': breakEnd,
+      'source': source,
+      'schedule_name': scheduleName,
+      'shift_id': shiftId,
+      'work_schedule_id': workScheduleId,
+      'is_overnight': isOvernight,
+    };
+  }
+
   // Factory for "No Schedule"
   factory DailySchedule.unscheduled() {
     return DailySchedule(

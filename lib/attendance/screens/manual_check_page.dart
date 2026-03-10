@@ -2,6 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import '../../helpers/timezone_helper.dart';
+import '../../services/offline_database_service.dart';
+import '../services/attendance_sync_service.dart';
+import '../services/attendance_service.dart';
+import '../../models/offline_attendance.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'dart:async';
 
 class ManualCheckPage extends StatefulWidget {
   final int organizationMemberId;
@@ -23,6 +29,8 @@ class ManualCheckPage extends StatefulWidget {
 
 class _ManualCheckPageState extends State<ManualCheckPage> {
   final SupabaseClient _supabase = Supabase.instance.client;
+  final OfflineDatabaseService _offlineDb = OfflineDatabaseService();
+  final AttendanceService _attendanceService = AttendanceService();
   final _formKey = GlobalKey<FormState>();
 
   // Form fields
@@ -40,6 +48,9 @@ class _ManualCheckPageState extends State<ManualCheckPage> {
   bool _isLoadingEmployees = true;
   bool _isSubmitting = false;
 
+  bool _isOnline = true;
+  StreamSubscription<ConnectivityResult>? _connectivitySub;
+
   int? _organizationId;
   final TextEditingController _searchController = TextEditingController();
 
@@ -48,10 +59,29 @@ class _ManualCheckPageState extends State<ManualCheckPage> {
     super.initState();
     _organizationId = widget.memberData['organization_id'] as int?;
     _loadEmployees();
+    _checkConnectivity();
+  }
+
+  Future<void> _checkConnectivity() async {
+    final result = await Connectivity().checkConnectivity();
+    if (mounted) {
+      setState(() {
+        _isOnline = result != ConnectivityResult.none;
+      });
+    }
+
+    _connectivitySub = Connectivity().onConnectivityChanged.listen((result) {
+      if (mounted) {
+        setState(() {
+          _isOnline = result != ConnectivityResult.none;
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
+    _connectivitySub?.cancel();
     _notesController.dispose();
     _locationController.dispose();
     _searchController.dispose();
@@ -76,7 +106,6 @@ class _ManualCheckPageState extends State<ManualCheckPage> {
             user_profiles!inner(
               id,
               first_name,
-              middle_name,
               last_name,
               display_name,
               profile_photo_url
@@ -92,14 +121,30 @@ class _ManualCheckPageState extends State<ManualCheckPage> {
           _filteredEmployees = _employees;
           _isLoadingEmployees = false;
         });
+
+        // Cache members for offline manual entry
+        await _offlineDb.cacheOrganizationMembers(_organizationId!, _employees);
       }
     } catch (e) {
-      debugPrint('Error loading employees: $e');
-      if (mounted) {
-        setState(() => _isLoadingEmployees = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      debugPrint('🌐 Offline/Error loading employees: $e');
+
+      // Try fallback from cache
+      if (_organizationId != null) {
+        final cachedMembers = await _offlineDb.getOrganizationMembers(
+          _organizationId!,
         );
+        if (mounted && cachedMembers != null) {
+          setState(() {
+            _employees = List<Map<String, dynamic>>.from(cachedMembers);
+            _filteredEmployees = _employees;
+            _isLoadingEmployees = false;
+          });
+          debugPrint('💾 Using cached members (${_employees.length} found)');
+        } else if (mounted) {
+          setState(() => _isLoadingEmployees = false);
+        }
+      } else if (mounted) {
+        setState(() => _isLoadingEmployees = false);
       }
     }
   }
@@ -277,89 +322,86 @@ class _ManualCheckPageState extends State<ManualCheckPage> {
         _selectedTime.hour,
         _selectedTime.minute,
       );
-      final attendanceDate = DateFormat('yyyy-MM-dd').format(_selectedDate);
 
-      // Basic check for existing record
-      final existing = await _supabase
-          .from('attendance_records')
-          .select('id, actual_check_in, actual_check_out')
-          .eq('organization_member_id', _selectedEmployeeId!)
-          .eq('attendance_date', attendanceDate)
-          .maybeSingle();
+      // Prepare data for attendance service
+      final rawData = {
+        'notes': _notesController.text,
+        'manual_address': _locationController.text,
+        'offline_timestamp': TimezoneHelper.formatUtcForSupabase(eventDateTime),
+        'synced_from_offline': false,
+      };
 
-      Map<String, dynamic> data = {};
-      if (_eventType == 'check_in') {
-        data = {
-          'actual_check_in': TimezoneHelper.formatUtcForSupabase(eventDateTime),
-          'check_in_method': 'manual',
-          'check_in_location': _locationController.text.isNotEmpty
-              ? {'address': _locationController.text, 'type': 'manual'}
-              : null,
-        };
-      } else {
-        data = {
-          'actual_check_out': TimezoneHelper.formatUtcForSupabase(
-            eventDateTime,
-          ),
-          'check_out_method': 'manual',
-          'check_out_location': _locationController.text.isNotEmpty
-              ? {'address': _locationController.text, 'type': 'manual'}
-              : null,
-        };
+      bool syncSuccess = false;
+      if (_isOnline) {
+        try {
+          if (_eventType == 'check_in') {
+            await _attendanceService.checkIn(
+              organizationMemberId: _selectedEmployeeId!,
+              method: widget.sourceMode ?? 'manual',
+              photoUrl: '',
+              location: _locationController.text.isNotEmpty
+                  ? {'address': _locationController.text, 'type': 'manual'}
+                  : null,
+              rawData: rawData,
+            );
+          } else {
+            await _attendanceService.checkOut(
+              organizationMemberId: _selectedEmployeeId!,
+              method: widget.sourceMode ?? 'manual',
+              photoUrl: '',
+              location: _locationController.text.isNotEmpty
+                  ? {'address': _locationController.text, 'type': 'manual'}
+                  : null,
+              rawData: rawData,
+            );
+          }
+          syncSuccess = true;
+          debugPrint('✅ Online manual attendance recorded');
+        } catch (e) {
+          debugPrint('⚠️ Online manual attempt failed: $e');
+        }
       }
 
-      int recordId;
-      if (existing != null) {
-        await _supabase
-            .from('attendance_records')
-            .update(data)
-            .eq('id', existing['id']);
-        recordId = existing['id'];
-      } else {
-        data.addAll({
-          'organization_member_id': _selectedEmployeeId,
-          'attendance_date': attendanceDate,
-          'status': 'present',
-          'validation_status': 'approved',
-        });
-        final res = await _supabase
-            .from('attendance_records')
-            .insert(data)
-            .select('id')
-            .single();
-        recordId = res['id'];
-      }
+      // Save offline record as fallback/history
+      final record = OfflineAttendance(
+        organizationMemberId: _selectedEmployeeId,
+        userName: _selectedEmployeeName,
+        cardNumber: widget.sourceMode == 'face_recognition_kiosk'
+            ? '' // Face mode doesn't need card number
+            : 'MANUAL_$_selectedEmployeeId',
+        eventType: _eventType,
+        method: widget.sourceMode ?? 'manual',
+        workTimeMode: widget.initialShiftName, // <-- ADDED THIS
+        timestamp: TimezoneHelper.formatUtcForSupabase(eventDateTime),
+        notes: _notesController.text,
+        isSynced: syncSuccess,
+      );
 
-      // Log entry
-      await _supabase.from('attendance_logs').insert({
-        'organization_member_id': _selectedEmployeeId,
-        'attendance_record_id': recordId,
-        'event_type': _eventType,
-        'event_time': TimezoneHelper.formatUtcForSupabase(eventDateTime),
-        'method': 'manual',
-        'is_verified': true,
-        'verification_method': 'manual_entry',
-        'raw_data': {
-          'notes': _notesController.text,
-          'entered_by': widget.organizationMemberId,
-          if (widget.sourceMode != null) 'source_mode': widget.sourceMode,
-          if (widget.initialShiftName != null &&
-              widget.initialShiftName!.isNotEmpty)
-            'shift_name': widget.initialShiftName,
-          if (widget.initialShiftName != null &&
-              widget.initialShiftName!.isNotEmpty)
-            'work_time_mode': widget.initialShiftName,
-        },
-      });
+      final id = await _offlineDb.insertAttendance(record);
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Attendance recorded successfully!'),
-            backgroundColor: Colors.green,
-          ),
+      if (id != 0) {
+        debugPrint(
+          '💾 Manual attendance saved to local DB (Synced: $syncSuccess)',
         );
-        Navigator.pop(context, true);
+
+        // Trigger background sync for other pending records
+        if (!syncSuccess) {
+          AttendanceSyncService().syncPendingAttendances();
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                syncSuccess
+                    ? 'Attendance recorded successfully!'
+                    : 'Attendance recorded offline (Safe for Sync)!',
+              ),
+              backgroundColor: syncSuccess ? Colors.green : Colors.blue,
+            ),
+          );
+          Navigator.pop(context, true);
+        }
       }
     } catch (e) {
       debugPrint('Error: $e');
