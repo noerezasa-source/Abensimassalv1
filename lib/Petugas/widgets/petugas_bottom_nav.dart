@@ -76,8 +76,8 @@ class PetugasBottomNav extends StatelessWidget {
             padding: EdgeInsets.only(
               left: 16,
               right: 16,
-              top: 8,
-              bottom: 8 + bottomPadding,
+              top: 2,
+              bottom: 2 + bottomPadding,
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -177,7 +177,7 @@ class PetugasBottomNav extends StatelessWidget {
           onTap: () => onNavigationTap(index),
           borderRadius: BorderRadius.circular(12),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisSize: MainAxisSize.max,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               // Top Indicator Line
@@ -227,14 +227,17 @@ class PetugasBottomNav extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 10,
-                  color: isSelected
-                      ? accentColor
-                      : (isDarkMode ? Colors.white54 : Colors.grey.shade600),
-                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: isSelected
+                        ? accentColor
+                        : (isDarkMode ? Colors.white54 : Colors.grey.shade600),
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],

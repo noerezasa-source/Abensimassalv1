@@ -12,6 +12,7 @@ import '../../models/attendance_record.dart';
 import '../../helpers/rfid_mode_helper.dart';
 import '../../attendance/screens/face_registration_page.dart';
 import '../../auth/screens/login.dart';
+import '../../attendance/screens/export_report_screen.dart';
 import 'petugas_members_page.dart';
 import '../../helpers/language_helper.dart';
 
@@ -47,14 +48,13 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
   bool _isUploadingPhoto = false;
   bool _isEditMode = false;
   bool _isSaving = false;
-  String _attendanceMode = 'face'; // 'face', 'rfid', or 'fingerprint'
-  int _currentNavIndex = 3; // Profile is index 3
+  String _attendanceMode = 'face';
+  int _currentNavIndex = 3;
   Map<String, dynamic>? _userProfile;
   Map<String, dynamic>? _organization;
   AttendanceRecord? _todayAttendance;
   String? _memberCardNumber;
 
-  // Form controllers
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _displayNameController;
   late TextEditingController _phoneController;
@@ -74,7 +74,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
     _loadOrganizationInfo();
     _loadTodayAttendance();
     _loadMemberRfidCard();
-    _loadAttendanceMode(); // Load selection from SharedPreferences
+    _loadAttendanceMode();
     if (_userProfile == null) {
       _loadUserProfile();
     } else {
@@ -100,12 +100,10 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
 
     switch (index) {
       case 0:
-        // Home - kembali ke dashboard
         Navigator.popUntil(context, (route) => route.isFirst);
         break;
 
       case 1:
-        // Member
         Navigator.push<bool>(
           context,
           PageRouteBuilder(
@@ -126,14 +124,13 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
         ).then((_) {
           if (mounted) {
             setState(() {
-              _currentNavIndex = 3; // Kembali ke Profile index
+              _currentNavIndex = 3;
             });
           }
         });
         break;
 
       case 2:
-        // Records - Navigate to Records Page
         Navigator.push<bool>(
           context,
           PageRouteBuilder(
@@ -154,14 +151,13 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
         ).then((_) {
           if (mounted) {
             setState(() {
-              _currentNavIndex = 3; // Kembali ke Profile index
+              _currentNavIndex = 3;
             });
           }
         });
         break;
 
       case 3:
-        // Profile - stay on current page
         break;
     }
   }
@@ -416,7 +412,6 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) throw Exception('User not logged in');
 
-      // Split display name menjadi first_name dan last_name
       final displayName = _displayNameController.text.trim();
       final nameParts = displayName
           .split(' ')
@@ -667,7 +662,62 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
                           _buildAttendanceSettingsCard(),
                           const SizedBox(height: 16),
                           _buildLanguageSettingsCard(),
-                          const SizedBox(height: 32),
+                          const SizedBox(height: 24),
+                          // 🔥 MENU EXPORT LAPORAN
+                          Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 24),
+                            child: Card(
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                side: BorderSide(
+                                  color: widget.isDarkMode
+                                      ? Colors.white12
+                                      : Colors.grey.shade200,
+                                ),
+                              ),
+                              color: widget.isDarkMode
+                                  ? const Color(0xFF2D144B)
+                                  : Colors.white,
+                              child: ListTile(
+                                leading: Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: const Color(
+                                      0xFF2196F3,
+                                    ).withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: const Icon(
+                                    Icons.download,
+                                    color: Color.fromARGB(255, 103, 45, 196),
+                                  ),
+                                ),
+                                title: const Text(
+                                  'Export Laporan',
+                                  style: TextStyle(fontWeight: FontWeight.w600),
+                                ),
+                                subtitle: const Text(
+                                  'Export data absensi ke PDF atau Excel',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                                trailing: const Icon(
+                                  Icons.chevron_right,
+                                  color: Colors.grey,
+                                ),
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const ExportReportScreen(),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
                           // LOGOUT BUTTON
                           Padding(
                             padding: const EdgeInsets.symmetric(
@@ -702,7 +752,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
                               ),
                             ),
                           ),
-                          const SizedBox(height: 100), // Spacing for bottom nav
+                          const SizedBox(height: 100),
                         ],
                       ),
                     ),
@@ -724,7 +774,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
       width: double.infinity,
       padding: EdgeInsets.only(
         top: MediaQuery.of(context).padding.top + 16,
-        bottom: 16, // Reduced from 32
+        bottom: 16,
       ),
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -756,7 +806,6 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
       padding: const EdgeInsets.only(top: 32),
       child: Column(
         children: [
-          // Profile Photo
           Stack(
             children: [
               Container(
@@ -820,7 +869,6 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
             ],
           ),
           const SizedBox(height: 20),
-          // Name
           Text(
             _getFullName(),
             style: TextStyle(
@@ -829,7 +877,6 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
               color: widget.isDarkMode ? Colors.white : Colors.black87,
             ),
           ),
-          // Username
           Text(
             userEmail,
             style: TextStyle(
@@ -841,7 +888,6 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
             ),
           ),
           const SizedBox(height: 8),
-          // Location
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -1051,54 +1097,6 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
       color: widget.isDarkMode
           ? Colors.white.withOpacity(0.05)
           : Colors.grey.withOpacity(0.1),
-    );
-  }
-
-  Widget _buildSectionCard({
-    required String title,
-    required IconData icon,
-    required List<Widget> children,
-    bool needsForm = false,
-  }) {
-    final cardContent = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(
-              icon,
-              color: widget.isDarkMode ? const Color(0xFFB066FF) : primaryColor,
-            ),
-            const SizedBox(width: 12),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: widget.isDarkMode ? Colors.white : Colors.black87,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        ...children,
-      ],
-    );
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: widget.isDarkMode ? const Color(0xFF2D144B) : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(widget.isDarkMode ? 0.2 : 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: needsForm ? Form(key: _formKey, child: cardContent) : cardContent,
     );
   }
 
