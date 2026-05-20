@@ -134,6 +134,7 @@ class _FaceAttendanceMultiUserPageState
   Map<String, dynamic>? _selectedMode;
   List<Map<String, dynamic>> _availableModes = [];
   bool _isLoadingModes = false;
+  bool _isRefreshing = false;
 
   List<Map<String, dynamic>> _detectedFaces = [];
 
@@ -498,6 +499,31 @@ class _FaceAttendanceMultiUserPageState
         _currentMessage = null;
         _messageType = MessageType.idle;
       });
+    }
+  }
+
+  Future<void> _refreshTemplates() async {
+    if (_isRefreshing || _isProcessing) return;
+    
+    setState(() {
+      _isRefreshing = true;
+      _showMessage('Menyegarkan data wajah...', MessageType.loading, seconds: 60); // Long timeout
+    });
+
+    try {
+      await _biometricService.refreshCache(widget.organizationId);
+      if (mounted) {
+        _showMessage('Data wajah berhasil diperbarui!', MessageType.success);
+      }
+    } catch (e) {
+      debugPrint('Refresh faces error: $e');
+      if (mounted) {
+        _showMessage('Gagal memperbarui data wajah', MessageType.error);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isRefreshing = false);
+      }
     }
   }
 
@@ -2231,6 +2257,12 @@ class _FaceAttendanceMultiUserPageState
                         );
                       }
                     },
+                  ),
+                  const SizedBox(width: 10),
+                  // Refresh Button
+                  _buildCircularActionButton(
+                    icon: _isRefreshing ? Icons.hourglass_empty : Icons.refresh_rounded,
+                    onTap: _isRefreshing ? () {} : _refreshTemplates,
                   ),
                   const SizedBox(width: 10),
                   // Menu Button

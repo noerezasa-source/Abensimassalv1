@@ -64,5 +64,6 @@
     "processing": "جاري المعالجة...",
     "cancel": "إلغاء",
     "step_label": "خطوة",
-    "step_from": "من 3"
+    "step_from": "من 3",
+    "break_available_at": "الاستراحة متاحة فقط من"
 }

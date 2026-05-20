@@ -57,5 +57,6 @@
     "processing": "Scanning...",
     "cancel": "Cancel",
     "step_label": "Step",
-    "step_from": "of 3"
+    "step_from": "of 3",
+    "break_available_at": "Break only available at"
 }

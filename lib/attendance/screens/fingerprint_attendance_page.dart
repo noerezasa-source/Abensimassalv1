@@ -61,6 +61,7 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
   String _statusMessage = AppLanguage.tr('attendance.fingerprint.initializing');
   Uint8List? _capturedImage;
   bool _isProcessing = false;
+  bool _isRefreshing = false;
   List<Map<String, dynamic>> _allTemplates = [];
 
   StreamSubscription? _statusSubscription;
@@ -248,6 +249,130 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
   Future<void> _initializeFlow() async {
     await _loadAllTemplates();
     await _startScanner();
+  }
+
+  /// Refresh template dari Supabase dan reload ke alat scanner.
+  /// Dipanggil saat tombol refresh ditekan — berguna jika ada user baru registrasi
+  /// setelah halaman ini sudah terbuka.
+  Future<void> _refreshTemplates() async {
+    if (_isRefreshing || _isProcessing) return;
+    final orgId = _organizationId;
+    if (orgId == null) return;
+
+    setState(() {
+      _isRefreshing = true;
+      _statusMessage = 'Memuat ulang template...';
+    });
+
+    try {
+      // 1. Hapus semua template lama dari memori alat
+      await _fingerprintService.clearAll();
+      debugPrint('🗑️ Cleared old templates from scanner memory');
+
+      // 2. Paksa fetch ulang dari Supabase (bypass cache)
+      final results = await _supabase
+          .from('biometric_data')
+          .select('''
+            id,
+            organization_member_id,
+            template_data,
+            organization_members!inner (
+              id,
+              user_id,
+              organization_id,
+              employee_id,
+              department_id,
+              user_profiles!inner (
+                id,
+                first_name,
+                last_name,
+                display_name,
+                profile_photo_url
+              ),
+              departments!organization_members_department_id_fkey (
+                id,
+                name
+              )
+            )
+          ''')
+          .eq('biometric_type', 'fingerprint')
+          .eq('is_active', true)
+          .eq('organization_members.organization_id', orgId);
+
+      final freshTemplates = List<Map<String, dynamic>>.from(results);
+      debugPrint('✅ Fetched ${freshTemplates.length} templates from Supabase');
+
+      // 3. Simpan ke state
+      if (mounted) {
+        setState(() {
+          _allTemplates = freshTemplates;
+        });
+      }
+
+      // 4. Load ke memori alat
+      if (freshTemplates.isNotEmpty) {
+        final formatted = freshTemplates
+            .map((t) => {
+                  'memberId': t['organization_member_id'].toString(),
+                  'template': t['template_data'],
+                })
+            .toList();
+        await _fingerprintService.loadTemplates(formatted);
+        await _fingerprintService.startIdentification();
+        debugPrint('📥 Reloaded ${freshTemplates.length} templates into scanner');
+
+        if (mounted) {
+          setState(() {
+            _statusMessage = AppLanguage.tr('attendance.fingerprint.place_finger');
+            _isScannerReady = true;
+          });
+        }
+
+        // Tampilkan snackbar sukses
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '✅ ${freshTemplates.length} template berhasil dimuat ulang',
+                style: const TextStyle(color: Colors.white),
+              ),
+              backgroundColor: Colors.green.shade700,
+              duration: const Duration(seconds: 3),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _statusMessage = AppLanguage.tr('attendance.fingerprint.no_database');
+            _isScannerReady = false;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Refresh templates error: $e');
+      if (mounted) {
+        setState(() {
+          _statusMessage = 'Gagal memuat ulang: $e';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '❌ Gagal refresh template: $e',
+              style: const TextStyle(color: Colors.white),
+            ),
+            backgroundColor: Colors.red.shade700,
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isRefreshing = false);
+    }
   }
 
   Future<void> _loadAllTemplates() async {
@@ -720,6 +845,37 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
                     size: 24,
                   ),
                   onPressed: () => Navigator.pop(context),
+                ),
+              ),
+            ),
+          ),
+          // Tombol Refresh Template (pojok kanan atas)
+          Positioned(
+            top: 40,
+            right: 20,
+            child: SafeArea(
+              child: Tooltip(
+                message: 'Refresh data fingerprint',
+                child: CircleAvatar(
+                  backgroundColor: const Color(0xFF9333EA).withOpacity(0.15),
+                  radius: 20,
+                  child: _isRefreshing
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Color(0xFF9333EA),
+                          ),
+                        )
+                      : IconButton(
+                          icon: const Icon(
+                            Icons.refresh_rounded,
+                            color: Color(0xFF9333EA),
+                            size: 22,
+                          ),
+                          onPressed: _refreshTemplates,
+                        ),
                 ),
               ),
             ),

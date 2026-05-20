@@ -57,5 +57,6 @@
     "processing": "Proses Scan...",
     "cancel": "Batal",
     "step_label": "Langkah",
-    "step_from": "dari 3"
+    "step_from": "dari 3",
+    "break_available_at": "Istirahat hanya tersedia pukul"
 }
