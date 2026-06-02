@@ -135,5 +135,7 @@
     "thu_short": "Kam",
     "fri_short": "Jum",
     "sat_short": "Sab",
-    "sun_short": "Min"
+    "sun_short": "Min",
+    "export_report": "Export Laporan",
+    "export_report_subtitle": "Export data absensi ke PDF atau Excel"
 }

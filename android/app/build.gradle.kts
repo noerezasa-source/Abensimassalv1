@@ -1,6 +1,6 @@
 plugins {
     id("com.android.application")
-    id("kotlin-android")
+    id("org.jetbrains.kotlin.android")
     id("dev.flutter.flutter-gradle-plugin")
 }
 
@@ -20,13 +20,13 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 
     kotlin {
         compilerOptions {
-            jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11
+            jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21
         }
     }
 
@@ -42,7 +42,10 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -73,21 +76,41 @@ tasks.whenTaskAdded {
 }
 
 dependencies {
-    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))
-    
+
+    implementation(
+        files(
+            "libs/zkandroidcore.jar",
+            "libs/zkandroidfpreader.jar",
+            "libs/zkandroidfingerservice.jar"
+        )
+    )
+
+    implementation(
+        fileTree(
+            mapOf(
+                "dir" to "libs",
+                "include" to listOf("*.jar")
+            )
+        )
+    )
+
     constraints {
         implementation("androidx.browser:browser:1.8.0") {
             because("Force older version for compatibility")
         }
+
         implementation("androidx.activity:activity:1.8.0") {
             because("Force older version for compatibility")
         }
+
         implementation("androidx.activity:activity-ktx:1.8.0") {
             because("Force older version for compatibility")
         }
+
         implementation("androidx.core:core:1.13.1") {
             because("Force older version for compatibility")
         }
+
         implementation("androidx.core:core-ktx:1.13.1") {
             because("Force older version for compatibility")
         }

@@ -139,21 +139,25 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
         }
       }
 
-      debugPrint('🔍 Validating Inv Code: "$invCode"');
+      debugPrint('🔍 Validating Invitation Code: "$invCode"');
 
       final orgResponse = await Supabase.instance.client
           .from('organizations')
           .select('id, name, inv_code')
-          .eq('inv_code', invCode)
+          .ilike('inv_code', invCode)
           .eq('is_active', true)
           .maybeSingle();
 
-      debugPrint('✅ Validating Inv Code Result: $orgResponse');
+      debugPrint('✅ Organization query result: $orgResponse');
 
-      if (orgResponse == null) throw Exception('Kode undangan tidak valid');
+      if (orgResponse == null) {
+        throw Exception('Kode undangan tidak valid – tidak menemukan organisasi.');
+      }
 
       final orgId = orgResponse['id'];
       final orgName = orgResponse['name'];
+
+      debugPrint('📌 orgId=$orgId, orgName=$orgName, userId=${user.id}');
 
       final existingMemberInOrg = await Supabase.instance.client
           .from('organization_members')
@@ -161,6 +165,8 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
           .eq('organization_id', orgId)
           .eq('user_id', user.id)
           .maybeSingle();
+
+      debugPrint('🔎 Existing member lookup: $existingMemberInOrg');
 
       int organizationMemberId;
 
@@ -188,7 +194,7 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
             .insert({
               'organization_id': orgId,
               'user_id': user.id,
-              'role_id': 2,
+              'role_id': 3, // US001 = User/Anggota (bukan Petugas)
               'hire_date': DateTime.now().toIso8601String().split('T')[0],
               'employment_status': 'active',
               'work_location': 'field',
@@ -208,15 +214,17 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
         _showSuccessDialog(orgName, organizationMemberId, memberData);
       }
     } catch (e) {
-      debugPrint('Error joining organization: $e');
+      debugPrint('❌ Error joining organization: $e');
       if (mounted) {
-        String errorMessage = _tr('join_org_error');
-        if (e.toString().contains('tidak valid') ||
-            e.toString().contains('not valid')) {
+        String errorMessage;
+        final errStr = e.toString();
+        if (errStr.contains('tidak valid') || errStr.contains('not valid')) {
           errorMessage = _tr('join_org_invalid_code');
-        } else if (e.toString().contains('sudah tergabung') ||
-            e.toString().contains('already')) {
+        } else if (errStr.contains('sudah tergabung') || errStr.contains('already')) {
           errorMessage = _tr('join_org_already_joined');
+        } else {
+          // Tampilkan pesan error aktual agar mudah debugging
+          errorMessage = 'Gagal bergabung: $errStr';
         }
         _showSnackBar(errorMessage, false);
       }
@@ -375,7 +383,7 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                  color: Colors.blue.withOpacity(0.2),
+                                  color: Colors.blue.withValues(alpha: 0.2),
                                   width: 1,
                                 ),
                               ),
@@ -418,7 +426,7 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                               side: BorderSide(color: Colors.grey.shade200),
                             ),
                             elevation: 2,
-                            shadowColor: Colors.black.withOpacity(0.05),
+                            shadowColor: Colors.black.withValues(alpha: 0.05),
                           ),
                           child: Row(
                             children: [
@@ -456,7 +464,7 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                         borderRadius: BorderRadius.circular(32),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.2),
+                            color: Colors.black.withValues(alpha: 0.2),
                             blurRadius: 20,
                             offset: const Offset(0, 10),
                           ),
@@ -508,7 +516,7 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold,
-                                  color: textBlack.withOpacity(0.7),
+                                  color: textBlack.withValues(alpha: 0.7),
                                   letterSpacing: 1.0,
                                 ),
                               ),
@@ -561,7 +569,7 @@ class _JoinOrganizationScreenState extends State<JoinOrganizationScreen> {
                                   BoxShadow(
                                     color: const Color(
                                       0xFF6200EE,
-                                    ).withOpacity(0.3),
+                                    ).withValues(alpha: 0.3),
                                     blurRadius: 10,
                                     offset: const Offset(0, 5),
                                   ),

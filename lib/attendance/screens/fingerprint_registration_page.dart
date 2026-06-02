@@ -282,10 +282,10 @@ class _FingerprintRegistrationPageState
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF4A1E79).withOpacity(0.05),
+                  color: const Color(0xFF4A1E79).withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: const Color(0xFF4A1E79).withOpacity(0.1),
+                    color: const Color(0xFF4A1E79).withValues(alpha: 0.1),
                   ),
                 ),
                 child: Text(
@@ -317,7 +317,7 @@ class _FingerprintRegistrationPageState
                       borderRadius: BorderRadius.circular(16),
                     ),
                     elevation: 4,
-                    shadowColor: const Color(0xFF4A1E79).withOpacity(0.4),
+                    shadowColor: const Color(0xFF4A1E79).withValues(alpha: 0.4),
                   ),
                   child: Text(
                     _isRegistering
@@ -394,7 +394,9 @@ class _FingerprintRegistrationPageState
             color: Colors.white,
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFF4A1E79).withOpacity(0.1 + (pulse * 0.2)),
+                color: const Color(
+                  0xFF4A1E79,
+                ).withValues(alpha: 0.1 + (pulse * 0.2)),
                 blurRadius: 15 + (pulse * 20),
                 spreadRadius: 2 + (pulse * 5),
               ),
@@ -402,7 +404,7 @@ class _FingerprintRegistrationPageState
             border: Border.all(
               color: const Color(
                 0xFF4A1E79,
-              ).withOpacity(_isRegistering ? 0.5 : 0.1),
+              ).withValues(alpha: _isRegistering ? 0.5 : 0.1),
               width: 4,
             ),
           ),

@@ -206,10 +206,10 @@ class _UserDashboardPageState extends State<UserDashboardPage>
         PageRouteBuilder(
           pageBuilder: (context, animation, secondaryAnimation) =>
               PetugasDashboardPage(
-            organizationMemberId: selectedMembership['id'] as int,
-            memberData: selectedMembership,
-            isDarkMode: _isDarkMode,
-          ),
+                organizationMemberId: selectedMembership['id'] as int,
+                memberData: selectedMembership,
+                isDarkMode: _isDarkMode,
+              ),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             return FadeTransition(opacity: animation, child: child);
           },
@@ -222,10 +222,10 @@ class _UserDashboardPageState extends State<UserDashboardPage>
         PageRouteBuilder(
           pageBuilder: (context, animation, secondaryAnimation) =>
               UserDashboardPage(
-            organizationMemberId: selectedMembership['id'] as int,
-            memberData: selectedMembership,
-            isDarkMode: _isDarkMode,
-          ),
+                organizationMemberId: selectedMembership['id'] as int,
+                memberData: selectedMembership,
+                isDarkMode: _isDarkMode,
+              ),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             return FadeTransition(opacity: animation, child: child);
           },
@@ -300,10 +300,12 @@ class _UserDashboardPageState extends State<UserDashboardPage>
                           decoration: BoxDecoration(
                             color: isActive
                                 ? (_isDarkMode
-                                      ? const Color(0xFFD0BCFF).withOpacity(0.1)
+                                      ? const Color(
+                                          0xFFD0BCFF,
+                                        ).withValues(alpha: 0.1)
                                       : const Color(
                                           0xFF4A1E79,
-                                        ).withOpacity(0.05))
+                                        ).withValues(alpha: 0.05))
                                 : (_isDarkMode
                                       ? Colors.white.withValues(alpha: 0.05)
                                       : Colors.white),
@@ -1078,7 +1080,7 @@ class _UserDashboardPageState extends State<UserDashboardPage>
                           decoration: BoxDecoration(
                             color: _getEventColor(
                               event['type'],
-                            ).withOpacity(0.1),
+                            ).withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Icon(
@@ -1126,7 +1128,7 @@ class _UserDashboardPageState extends State<UserDashboardPage>
                               width: double.infinity,
                               height: 220,
                               color: _isDarkMode
-                                  ? Colors.white.withOpacity(0.05)
+                                  ? Colors.white.withValues(alpha: 0.05)
                                   : Colors.grey[200],
                               child: const Center(
                                 child: CircularProgressIndicator(),
@@ -1136,7 +1138,7 @@ class _UserDashboardPageState extends State<UserDashboardPage>
                               width: double.infinity,
                               height: 220,
                               color: _isDarkMode
-                                  ? Colors.white.withOpacity(0.05)
+                                  ? Colors.white.withValues(alpha: 0.05)
                                   : Colors.grey[200],
                               child: Icon(
                                 Icons.error_outline,
@@ -1155,13 +1157,13 @@ class _UserDashboardPageState extends State<UserDashboardPage>
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         color: _isDarkMode
-                            ? Colors.white.withOpacity(0.03)
-                            : const Color(0xFF4A1E79).withOpacity(0.05),
+                            ? Colors.white.withValues(alpha: 0.03)
+                            : const Color(0xFF4A1E79).withValues(alpha: 0.05),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
                           color: _isDarkMode
                               ? Colors.white10
-                              : const Color(0xFF4A1E79).withOpacity(0.1),
+                              : const Color(0xFF4A1E79).withValues(alpha: 0.1),
                           width: 1,
                         ),
                       ),
@@ -1424,10 +1426,10 @@ class _UserDashboardPageState extends State<UserDashboardPage>
                                   vertical: 4,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.12),
+                                  color: Colors.white.withValues(alpha: 0.12),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                    color: Colors.white.withOpacity(0.2),
+                                    color: Colors.white.withValues(alpha: 0.2),
                                     width: 1,
                                   ),
                                 ),
@@ -1441,7 +1443,9 @@ class _UserDashboardPageState extends State<UserDashboardPage>
                                         style: TextStyle(
                                           fontSize: 12,
                                           fontWeight: FontWeight.w500,
-                                          color: Colors.white.withOpacity(0.95),
+                                          color: Colors.white.withValues(
+                                            alpha: 0.95,
+                                          ),
                                         ),
                                         textAlign: TextAlign.center,
                                         overflow: TextOverflow.ellipsis,
@@ -1450,7 +1454,9 @@ class _UserDashboardPageState extends State<UserDashboardPage>
                                     const SizedBox(width: 4),
                                     Icon(
                                       Icons.keyboard_arrow_down_rounded,
-                                      color: Colors.white.withOpacity(0.8),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.8,
+                                      ),
                                       size: 16,
                                     ),
                                   ],
@@ -1465,7 +1471,7 @@ class _UserDashboardPageState extends State<UserDashboardPage>
                               vertical: 5,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.2),
+                              color: Colors.white.withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Row(
@@ -1670,7 +1676,7 @@ class _UserDashboardPageState extends State<UserDashboardPage>
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(_isDarkMode ? 0.2 : 0.04),
+            color: Colors.black.withValues(alpha: _isDarkMode ? 0.2 : 0.04),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -1683,7 +1689,7 @@ class _UserDashboardPageState extends State<UserDashboardPage>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF8938DF).withOpacity(0.1),
+                  color: const Color(0xFF8938DF).withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
@@ -1726,7 +1732,7 @@ class _UserDashboardPageState extends State<UserDashboardPage>
                   vertical: 4,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.1),
+                  color: Colors.orange.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
@@ -2314,7 +2320,7 @@ class _UserDashboardPageState extends State<UserDashboardPage>
                                         (status.contains('LATE')
                                                 ? Colors.orange
                                                 : Colors.green)
-                                            .withOpacity(0.12),
+                                            .withValues(alpha: 0.12),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: Text(
@@ -2465,12 +2471,12 @@ class _UserDashboardPageState extends State<UserDashboardPage>
                                         ? Colors.white10
                                         : const Color(
                                             0xFF4A1E79,
-                                          ).withOpacity(0.08),
+                                          ).withValues(alpha: 0.08),
                                     borderRadius: BorderRadius.circular(6),
                                     border: Border.all(
                                       color: const Color(
                                         0xFF4A1E79,
-                                      ).withOpacity(0.1),
+                                      ).withValues(alpha: 0.1),
                                     ),
                                   ),
                                   child: Text(
@@ -2614,7 +2620,7 @@ class _UserDashboardPageState extends State<UserDashboardPage>
                 shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
-                    color: const Color(0xFF4A1E79).withOpacity(0.3),
+                    color: const Color(0xFF4A1E79).withValues(alpha: 0.3),
                     blurRadius: 8,
                     offset: const Offset(0, 2),
                   ),
@@ -2625,7 +2631,7 @@ class _UserDashboardPageState extends State<UserDashboardPage>
                 fontWeight: FontWeight.bold,
               ),
               todayDecoration: BoxDecoration(
-                color: const Color(0xFF4A1E79).withOpacity(0.2),
+                color: const Color(0xFF4A1E79).withValues(alpha: 0.2),
                 shape: BoxShape.circle,
               ),
               todayTextStyle: const TextStyle(
@@ -2854,12 +2860,12 @@ class _UserDashboardPageState extends State<UserDashboardPage>
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
-                      colors: [eventColor.withOpacity(0.8), eventColor],
+                      colors: [eventColor.withValues(alpha: 0.8), eventColor],
                     ),
                     borderRadius: BorderRadius.circular(10),
                     boxShadow: [
                       BoxShadow(
-                        color: eventColor.withOpacity(0.3),
+                        color: eventColor.withValues(alpha: 0.3),
                         blurRadius: 8,
                         offset: const Offset(0, 2),
                       ),
@@ -2950,10 +2956,10 @@ class _UserDashboardPageState extends State<UserDashboardPage>
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: _getStatusColor(event['status']).withOpacity(0.15),
+              color: _getStatusColor(event['status']).withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(6),
               border: Border.all(
-                color: _getStatusColor(event['status']).withOpacity(0.5),
+                color: _getStatusColor(event['status']).withValues(alpha: 0.5),
                 width: 1,
               ),
             ),
@@ -2970,10 +2976,10 @@ class _UserDashboardPageState extends State<UserDashboardPage>
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: Colors.orange.withOpacity(0.15),
+              color: Colors.orange.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(6),
               border: Border.all(
-                color: Colors.orange.withOpacity(0.5),
+                color: Colors.orange.withValues(alpha: 0.5),
                 width: 1,
               ),
             ),

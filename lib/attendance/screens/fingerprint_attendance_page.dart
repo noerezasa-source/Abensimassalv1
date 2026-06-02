@@ -312,18 +312,24 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
       // 4. Load ke memori alat
       if (freshTemplates.isNotEmpty) {
         final formatted = freshTemplates
-            .map((t) => {
-                  'memberId': t['organization_member_id'].toString(),
-                  'template': t['template_data'],
-                })
+            .map(
+              (t) => {
+                'memberId': t['organization_member_id'].toString(),
+                'template': t['template_data'],
+              },
+            )
             .toList();
         await _fingerprintService.loadTemplates(formatted);
         await _fingerprintService.startIdentification();
-        debugPrint('📥 Reloaded ${freshTemplates.length} templates into scanner');
+        debugPrint(
+          '📥 Reloaded ${freshTemplates.length} templates into scanner',
+        );
 
         if (mounted) {
           setState(() {
-            _statusMessage = AppLanguage.tr('attendance.fingerprint.place_finger');
+            _statusMessage = AppLanguage.tr(
+              'attendance.fingerprint.place_finger',
+            );
             _isScannerReady = true;
           });
         }
@@ -339,14 +345,18 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
               backgroundColor: Colors.green.shade700,
               duration: const Duration(seconds: 3),
               behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
           );
         }
       } else {
         if (mounted) {
           setState(() {
-            _statusMessage = AppLanguage.tr('attendance.fingerprint.no_database');
+            _statusMessage = AppLanguage.tr(
+              'attendance.fingerprint.no_database',
+            );
             _isScannerReady = false;
           });
         }
@@ -366,7 +376,9 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
             backgroundColor: Colors.red.shade700,
             duration: const Duration(seconds: 3),
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
           ),
         );
       }
@@ -658,7 +670,7 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.orange.withOpacity(0.3),
+                  color: Colors.orange.withValues(alpha: 0.3),
                   blurRadius: 20,
                   offset: const Offset(0, 8),
                 ),
@@ -669,7 +681,7 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
+                    color: Colors.white.withValues(alpha: 0.2),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(
@@ -836,7 +848,7 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
             left: 20,
             child: SafeArea(
               child: CircleAvatar(
-                backgroundColor: Colors.grey.shade200.withOpacity(0.8),
+                backgroundColor: Colors.grey.shade200.withValues(alpha: 0.8),
                 radius: 20,
                 child: IconButton(
                   icon: const Icon(
@@ -857,7 +869,9 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
               child: Tooltip(
                 message: 'Refresh data fingerprint',
                 child: CircleAvatar(
-                  backgroundColor: const Color(0xFF9333EA).withOpacity(0.15),
+                  backgroundColor: const Color(
+                    0xFF9333EA,
+                  ).withValues(alpha: 0.15),
                   radius: 20,
                   child: _isRefreshing
                       ? const SizedBox(
@@ -972,7 +986,7 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFF9333EA).withOpacity(0.3),
+                color: const Color(0xFF9333EA).withValues(alpha: 0.3),
                 blurRadius: 15,
                 offset: const Offset(0, 8),
               ),
@@ -983,7 +997,7 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
+                  color: Colors.white.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Icon(
@@ -1160,7 +1174,9 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           border: Border.all(
-            color: const Color(0xFF9333EA).withOpacity(opacity * (1 - value)),
+            color: const Color(
+              0xFF9333EA,
+            ).withValues(alpha: opacity * (1 - value)),
             width: 1,
           ),
         ),
@@ -1181,7 +1197,7 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(24, 10, 24, 20),
       itemCount: _entries.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      separatorBuilder: (_, _) => const SizedBox(height: 12),
       itemBuilder: (_, index) => _buildEntryCard(_entries[index]),
     );
   }
@@ -1265,9 +1281,9 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: color.withOpacity(0.2)),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
       child: Text(
         label,
@@ -1347,7 +1363,9 @@ class _FingerprintAttendancePageState extends State<FingerprintAttendancePage> {
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
                               color: isSelected
-                                  ? const Color(0xFF9333EA).withOpacity(0.1)
+                                  ? const Color(
+                                      0xFF9333EA,
+                                    ).withValues(alpha: 0.1)
                                   : Colors.grey.shade100,
                               shape: BoxShape.circle,
                             ),

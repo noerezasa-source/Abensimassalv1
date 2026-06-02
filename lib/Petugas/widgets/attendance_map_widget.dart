@@ -274,12 +274,12 @@ class AttendanceMapWidgetState extends State<AttendanceMapWidget>
   }
 
   Widget _buildDefaultUserIcon() => Container(
-    color: const Color(0xFF6366F1).withOpacity(0.1),
+    color: const Color(0xFF6366F1).withValues(alpha: 0.1),
     child: const Icon(Icons.person, color: Color(0xFF6366F1), size: 20),
   );
 
   Widget _buildDefaultOfficeIcon() => Container(
-    color: const Color(0xFF10B981).withOpacity(0.1),
+    color: const Color(0xFF10B981).withValues(alpha: 0.1),
     child: const Icon(Icons.business, color: Color(0xFF10B981), size: 20),
   );
 
@@ -309,7 +309,7 @@ class AttendanceMapWidgetState extends State<AttendanceMapWidget>
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
+            color: Colors.black.withValues(alpha: 0.08),
             blurRadius: 12,
             offset: const Offset(0, 2),
           ),
@@ -370,7 +370,7 @@ class AttendanceMapWidgetState extends State<AttendanceMapWidget>
           borderRadius: BorderRadius.circular(10),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.1),
+              color: Colors.black.withValues(alpha: 0.1),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),

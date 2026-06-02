@@ -223,8 +223,10 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
         });
       }
     } catch (e) {
+      debugPrint('❌ ERROR loading members: $e');
       if (mounted) {
         setState(() {
+          _errorMessage = e.toString();
           if (!isInitial) _isContentLoading = false;
         });
       }
@@ -308,7 +310,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
           PageRouteBuilder(
             transitionDuration: Duration.zero,
             reverseTransitionDuration: Duration.zero,
-            pageBuilder: (context, _, __) => Container(
+            pageBuilder: (context, _, _) => Container(
               color: widget.isDarkMode
                   ? const Color(0xFF1F0B38)
                   : const Color(0xFFF8F9FA),
@@ -332,7 +334,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
           PageRouteBuilder(
             transitionDuration: Duration.zero,
             reverseTransitionDuration: Duration.zero,
-            pageBuilder: (context, _, __) => Container(
+            pageBuilder: (context, _, _) => Container(
               color: widget.isDarkMode
                   ? const Color(0xFF1F0B38)
                   : const Color(0xFFF8F9FA),
@@ -501,8 +503,8 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                     border: Border(
                       bottom: BorderSide(
                         color: widget.isDarkMode
-                            ? Colors.white.withOpacity(0.08)
-                            : Colors.grey.withOpacity(0.15),
+                            ? Colors.white.withValues(alpha: 0.08)
+                            : Colors.grey.withValues(alpha: 0.15),
                         width: 1.0,
                       ),
                     ),
@@ -520,7 +522,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                       controller: _tabController,
                       isScrollable: false,
                       labelColor: Colors.white,
-                      unselectedLabelColor: Colors.white.withOpacity(0.6),
+                      unselectedLabelColor: Colors.white.withValues(alpha: 0.6),
                       indicatorColor: Colors.white,
                       indicatorWeight: 3,
                       indicatorSize: TabBarIndicatorSize.label,
@@ -589,7 +591,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                     '${_memberPerformanceStats['total_members'] ?? 0}',
                     Icons.groups_rounded,
                     widget.isDarkMode
-                        ? Colors.white.withOpacity(0.1)
+                        ? Colors.white.withValues(alpha: 0.1)
                         : const Color(0xFFF3E8FF),
                     widget.isDarkMode ? Colors.white : const Color(0xFF9333EA),
                   ),
@@ -601,7 +603,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                     '${_memberPerformanceStats['active_members'] ?? 0}',
                     Icons.group_add_rounded,
                     widget.isDarkMode
-                        ? Colors.white.withOpacity(0.1)
+                        ? Colors.white.withValues(alpha: 0.1)
                         : const Color(0xFFF3E8FF),
                     widget.isDarkMode ? Colors.white : const Color(0xFF9333EA),
                   ),
@@ -639,7 +641,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF9333EA).withOpacity(0.04),
+            color: const Color(0xFF9333EA).withValues(alpha: 0.04),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -696,7 +698,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
         borderRadius: BorderRadius.circular(28),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF9333EA).withOpacity(0.3),
+            color: const Color(0xFF9333EA).withValues(alpha: 0.3),
             blurRadius: 20,
             offset: const Offset(0, 10),
           ),
@@ -723,7 +725,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                   vertical: 4,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
+                  color: Colors.white.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(
@@ -764,7 +766,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
           Text(
             AppLanguage.tr('Petugas.members.on_time_attendance'),
             style: TextStyle(
-              color: Colors.white.withOpacity(0.8),
+              color: Colors.white.withValues(alpha: 0.8),
               fontSize: 13,
               fontWeight: FontWeight.w500,
             ),
@@ -965,7 +967,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
             borderRadius: BorderRadius.circular(18),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(widget.isDarkMode ? 0.3 : 0.02),
+                color: Colors.black.withValues(
+                  alpha: widget.isDarkMode ? 0.3 : 0.02,
+                ),
                 blurRadius: 10,
                 offset: const Offset(0, 4),
               ),
@@ -1075,7 +1079,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
@@ -1113,7 +1117,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(widget.isDarkMode ? 0.2 : 0.05),
+            color: Colors.black.withValues(
+              alpha: widget.isDarkMode ? 0.2 : 0.05,
+            ),
             blurRadius: 15,
             offset: const Offset(0, 5),
           ),
@@ -1128,7 +1134,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
               padding: const EdgeInsets.symmetric(horizontal: 8),
               decoration: BoxDecoration(
                 color: widget.isDarkMode
-                    ? Colors.white.withOpacity(0.05)
+                    ? Colors.white.withValues(alpha: 0.05)
                     : Colors.grey.shade100,
                 borderRadius: BorderRadius.circular(10),
               ),
@@ -1191,7 +1197,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
             padding: const EdgeInsets.symmetric(horizontal: 4),
             decoration: BoxDecoration(
               color: widget.isDarkMode
-                  ? Colors.white.withOpacity(0.05)
+                  ? Colors.white.withValues(alpha: 0.05)
                   : Colors.grey.shade100,
               borderRadius: BorderRadius.circular(10),
             ),
@@ -1243,6 +1249,36 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
   }
 
   Widget _buildMembersList() {
+    // Show database error if present
+    if (_errorMessage != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline, size: 48, color: Colors.red),
+              const SizedBox(height: 16),
+              Text(
+                'Gagal memuat anggota:\n$_errorMessage',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.red, fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.refresh),
+                label: const Text('Coba Lagi'),
+                onPressed: () {
+                  setState(() => _errorMessage = null);
+                  _loadOrganizationMembersOptimized(page: _currentPage);
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     final filteredMembers = _organizationMembers;
     final isFiltering =
         _searchController.text.isNotEmpty || _selectedDepartment != 'all';
@@ -1408,7 +1444,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                 : (widget.isDarkMode ? Colors.white12 : Colors.grey.shade200),
           ),
           backgroundColor: onPressed != null && widget.isDarkMode
-              ? const Color(0xFF8938DF).withOpacity(0.05)
+              ? const Color(0xFF8938DF).withValues(alpha: 0.05)
               : null,
         ),
         child: Row(
@@ -1585,7 +1621,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
 
     final photoUrl = _getMemberPhotoUrl(member);
     final accentColor = const Color(0xFF8938DF);
-    final softAccent = accentColor.withOpacity(0.1);
+    final softAccent = accentColor.withValues(alpha: 0.1);
 
     bool hasFaceData = false;
     bool hasFingerprintData = false;
@@ -1627,7 +1663,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(widget.isDarkMode ? 0.2 : 0.03),
+            color: Colors.black.withValues(
+              alpha: widget.isDarkMode ? 0.2 : 0.03,
+            ),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
@@ -1700,7 +1738,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                               fontSize: 11,
                               color: widget.isDarkMode
                                   ? Colors.white54
-                                  : const Color(0xFF8938DF).withOpacity(0.7),
+                                  : const Color(
+                                      0xFF8938DF,
+                                    ).withValues(alpha: 0.7),
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1714,8 +1754,12 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                             ),
                             decoration: BoxDecoration(
                               color: (!hasFaceData && !hasFingerprintData)
-                                  ? const Color(0xFFEF4444).withOpacity(0.12)
-                                  : const Color(0xFFF59E0B).withOpacity(0.12),
+                                  ? const Color(
+                                      0xFFEF4444,
+                                    ).withValues(alpha: 0.12)
+                                  : const Color(
+                                      0xFFF59E0B,
+                                    ).withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
@@ -1775,7 +1819,9 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
         width: 30,
         height: 30,
         decoration: BoxDecoration(
-          color: widget.isDarkMode ? Colors.white.withOpacity(0.05) : bgColor,
+          color: widget.isDarkMode
+              ? Colors.white.withValues(alpha: 0.05)
+              : bgColor,
           shape: BoxShape.circle,
         ),
         child: Icon(
@@ -1869,7 +1915,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.3),
+                  color: Colors.white.withValues(alpha: 0.3),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -2209,7 +2255,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                       width: 36,
                       height: 4,
                       decoration: BoxDecoration(
-                        color: Colors.grey.withOpacity(0.3),
+                        color: Colors.grey.withValues(alpha: 0.3),
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
@@ -2248,7 +2294,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                                     shape: BoxShape.circle,
                                     color: const Color(
                                       0xFF8938DF,
-                                    ).withOpacity(0.1),
+                                    ).withValues(alpha: 0.1),
                                   ),
                                   child: const Icon(
                                     Icons.nfc_rounded,
@@ -2280,7 +2326,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                                     shape: BoxShape.circle,
                                     color: const Color(
                                       0xFF10B981,
-                                    ).withOpacity(0.1),
+                                    ).withValues(alpha: 0.1),
                                   ),
                                   child: const Icon(
                                     Icons.check_circle_rounded,
@@ -2308,12 +2354,12 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                                   decoration: BoxDecoration(
                                     color: const Color(
                                       0xFF8938DF,
-                                    ).withOpacity(0.08),
+                                    ).withValues(alpha: 0.08),
                                     borderRadius: BorderRadius.circular(10),
                                     border: Border.all(
                                       color: const Color(
                                         0xFF8938DF,
-                                      ).withOpacity(0.2),
+                                      ).withValues(alpha: 0.2),
                                     ),
                                   ),
                                   child: Text(
@@ -2485,13 +2531,13 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
                 color: widget.isDarkMode
-                    ? Colors.blue.withOpacity(0.15)
-                    : Colors.blue.withOpacity(0.05),
+                    ? Colors.blue.withValues(alpha: 0.15)
+                    : Colors.blue.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
                   color: widget.isDarkMode
-                      ? Colors.blue.withOpacity(0.3)
-                      : Colors.blue.withOpacity(0.2),
+                      ? Colors.blue.withValues(alpha: 0.3)
+                      : Colors.blue.withValues(alpha: 0.2),
                 ),
               ),
               child: Column(
@@ -2615,10 +2661,10 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 20),
         decoration: BoxDecoration(
-          color: color.withOpacity(widget.isDarkMode ? 0.15 : 0.05),
+          color: color.withValues(alpha: widget.isDarkMode ? 0.15 : 0.05),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: color.withOpacity(widget.isDarkMode ? 0.3 : 0.1),
+            color: color.withValues(alpha: widget.isDarkMode ? 0.3 : 0.1),
           ),
         ),
         child: Column(
@@ -2852,8 +2898,8 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(
-                          widget.isDarkMode ? 0.2 : 0.05,
+                        color: Colors.black.withValues(
+                          alpha: widget.isDarkMode ? 0.2 : 0.05,
                         ),
                         blurRadius: 15,
                         offset: const Offset(0, 5),
@@ -3007,7 +3053,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
             color: widget.isDarkMode
-                ? Colors.white.withOpacity(0.03)
+                ? Colors.white.withValues(alpha: 0.03)
                 : Colors.grey.shade50,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
@@ -3108,7 +3154,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
         border: Border(
           bottom: BorderSide(
             color: widget.isDarkMode
-                ? Colors.white.withOpacity(0.05)
+                ? Colors.white.withValues(alpha: 0.05)
                 : Colors.grey.shade100,
             width: 1,
           ),
@@ -3125,7 +3171,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
               boxShadow: rank <= 3
                   ? [
                       BoxShadow(
-                        color: circleColor.withOpacity(0.3),
+                        color: circleColor.withValues(alpha: 0.3),
                         blurRadius: 8,
                         offset: const Offset(0, 3),
                       ),
@@ -3207,7 +3253,7 @@ class _PetugasMembersPageState extends State<PetugasMembersPage>
                 decoration: BoxDecoration(
                   color: const Color(
                     0xFF8B5CF6,
-                  ).withOpacity(widget.isDarkMode ? 0.2 : 0.1),
+                  ).withValues(alpha: widget.isDarkMode ? 0.2 : 0.1),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Text(

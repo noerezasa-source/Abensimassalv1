@@ -18,7 +18,7 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
   bool _obscurePassword = true;
   bool _isLoading = false;
   // HAPUS: bool _agreeToTerms = false;
-  
+
   final supabase = Supabase.instance.client;
   static const Color successColor = Color(0xFF10B981);
 
@@ -31,8 +31,12 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
   }
 
   Map<String, String> _splitName(String fullName) {
-    List<String> nameParts = fullName.trim().split(' ').where((n) => n.isNotEmpty).toList();
-    
+    List<String> nameParts = fullName
+        .trim()
+        .split(' ')
+        .where((n) => n.isNotEmpty)
+        .toList();
+
     if (nameParts.isEmpty) {
       return {'first_name': 'User', 'last_name': ''};
     } else if (nameParts.length == 1) {
@@ -44,16 +48,20 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
     }
   }
 
-  Future<bool> _createUserProfile(String userId, String fullName, String email) async {
+  Future<bool> _createUserProfile(
+    String userId,
+    String fullName,
+    String email,
+  ) async {
     try {
       debugPrint('Creating user profile for: $userId');
-      
+
       final nameParts = _splitName(fullName);
       final firstName = nameParts['first_name']!;
       final lastName = nameParts['last_name']!;
-      
+
       await Future.delayed(const Duration(milliseconds: 500));
-      
+
       final existingProfile = await supabase
           .from('user_profiles')
           .select('id, email')
@@ -74,19 +82,19 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
             .eq('id', userId);
       } else {
         debugPrint('Creating new user profile...');
-        await supabase
-            .from('user_profiles')
-            .insert({
-              'id': userId,
-              'first_name': firstName,
-              'last_name': lastName,
-              'display_name': fullName,
-              'email': email,
-              'is_active': true,
-            });
+        await supabase.from('user_profiles').insert({
+          'id': userId,
+          'first_name': firstName,
+          'last_name': lastName,
+          'display_name': fullName,
+          'email': email,
+          'is_active': true,
+        });
       }
 
-      debugPrint('User profile created/updated successfully with email: $email');
+      debugPrint(
+        'User profile created/updated successfully with email: $email',
+      );
       return true;
     } catch (e) {
       debugPrint('Error creating user profile: $e');
@@ -97,7 +105,7 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
   String _parseAuthError(dynamic error) {
     try {
       String errorString = error.toString().toLowerCase();
-      
+
       if (errorString.contains('already registered') ||
           errorString.contains('user_already_exists')) {
         return AppLanguage.tr('email_already_registered');
@@ -114,7 +122,7 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
           errorString.contains('failed host lookup')) {
         return 'Tidak ada koneksi internet. Mohon periksa koneksi Anda dan coba lagi.';
       }
-      
+
       return AppLanguage.tr('signup_error');
     } catch (e) {
       return AppLanguage.tr('signup_error');
@@ -123,7 +131,7 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
 
   Future<void> _signUp() async {
     if (_isLoading) return;
-    
+
     if (!_formKey.currentState!.validate()) return;
 
     // HAPUS pengecekan terms
@@ -142,15 +150,12 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
       final AuthResponse res = await supabase.auth.signUp(
         email: email,
         password: password,
-        data: {
-          'name': name,
-          'display_name': name,
-        },
+        data: {'name': name, 'display_name': name},
       );
 
       if (res.user != null) {
         debugPrint('Signup successful, user ID: ${res.user!.id}');
-        
+
         final profileSuccess = await _createUserProfile(
           res.user!.id,
           name,
@@ -162,7 +167,7 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
         }
 
         if (!mounted) return;
-        
+
         _showSuccessDialog();
       } else {
         if (!mounted) return;
@@ -181,7 +186,7 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
 
   void _showSnackBar(String message, bool isSuccess) {
     if (!mounted) return;
-    
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -220,7 +225,7 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: successColor.withOpacity(0.3),
+                        color: successColor.withValues(alpha: 0.3),
                         blurRadius: 20,
                         offset: const Offset(0, 10),
                       ),
@@ -262,10 +267,12 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
                       _nameController.clear();
                       _emailController.clear();
                       _passwordController.clear();
-                      
+
                       Navigator.pushReplacement(
                         context,
-                        MaterialPageRoute(builder: (_) => const ModernLoginScreen()),
+                        MaterialPageRoute(
+                          builder: (_) => const ModernLoginScreen(),
+                        ),
                       );
                     },
                     style: ElevatedButton.styleFrom(
@@ -327,7 +334,7 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
                           ),
                         ),
                         const SizedBox(height: 24),
-                        
+
                         // Full Name Field
                         _buildInputLabel(AppLanguage.tr('full_name')),
                         const SizedBox(height: 6),
@@ -346,9 +353,9 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
                             return null;
                           },
                         ),
-                        
+
                         const SizedBox(height: 16),
-                        
+
                         // Email Field
                         _buildInputLabel(AppLanguage.tr('email_address')),
                         const SizedBox(height: 6),
@@ -360,15 +367,17 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
                             if (value == null || value.trim().isEmpty) {
                               return AppLanguage.tr('email_required');
                             }
-                            if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
+                            if (!RegExp(
+                              r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
+                            ).hasMatch(value)) {
                               return AppLanguage.tr('email_invalid');
                             }
                             return null;
                           },
                         ),
-                        
+
                         const SizedBox(height: 16),
-                        
+
                         // Password Field
                         _buildInputLabel(AppLanguage.tr('password')),
                         const SizedBox(height: 6),
@@ -378,11 +387,15 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
                           obscureText: _obscurePassword,
                           suffixIcon: IconButton(
                             icon: Icon(
-                              _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                              _obscurePassword
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined,
                               color: Colors.grey.shade400,
                               size: 20,
                             ),
-                            onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                            onPressed: () => setState(
+                              () => _obscurePassword = !_obscurePassword,
+                            ),
                           ),
                           validator: (value) {
                             if (value == null || value.isEmpty) {
@@ -394,9 +407,9 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
                             return null;
                           },
                         ),
-                        
+
                         const SizedBox(height: 32),
-                        
+
                         // Create Account Button
                         SizedBox(
                           width: double.infinity,
@@ -406,7 +419,9 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
                               borderRadius: BorderRadius.circular(16),
                               boxShadow: [
                                 BoxShadow(
-                                  color: const Color(0xFF673AB7).withOpacity(0.2),
+                                  color: const Color(
+                                    0xFF673AB7,
+                                  ).withValues(alpha: 0.2),
                                   blurRadius: 15,
                                   offset: const Offset(0, 8),
                                 ),
@@ -428,7 +443,10 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
                                       height: 24,
                                       child: CircularProgressIndicator(
                                         strokeWidth: 2.5,
-                                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                              Colors.white,
+                                            ),
                                       ),
                                     )
                                   : Text(
@@ -441,9 +459,9 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
                             ),
                           ),
                         ),
-                        
+
                         const SizedBox(height: 8),
-                        
+
                         Padding(
                           padding: EdgeInsets.zero,
                           child: Row(
@@ -460,7 +478,10 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
                                 onTap: () {
                                   Navigator.pushReplacement(
                                     context,
-                                    MaterialPageRoute(builder: (context) => const ModernLoginScreen()),
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const ModernLoginScreen(),
+                                    ),
                                   );
                                 },
                                 child: Text(
@@ -493,7 +514,7 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
       style: TextStyle(
         fontSize: 12,
         fontWeight: FontWeight.bold,
-        color: Colors.blueGrey.shade800.withOpacity(0.6),
+        color: Colors.blueGrey.shade800.withValues(alpha: 0.6),
         letterSpacing: 0.5,
       ),
     );
@@ -520,7 +541,10 @@ class _ModernSignupScreenState extends State<ModernSignupScreen> {
         hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 15),
         filled: true,
         fillColor: const Color(0xFFF1F4F9),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 20,
+          vertical: 18,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide.none,

@@ -329,7 +329,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
         final member =
             activity['organization_members'] as Map<String, dynamic>? ?? {};
         final profile = member['user_profiles'] as Map<String, dynamic>? ?? {};
-        final department = member['departments'] as Map<String, dynamic>? ?? {};
+        final department = member['department'] as String?;
         final record =
             activity['attendance_records'] as Map<String, dynamic>? ?? {};
         final rawData = activity['raw_data'] as Map<String, dynamic>? ?? {};
@@ -370,7 +370,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
               profile['profile_photo_url'] as String?,
             ),
             'department':
-                department['name'] as String? ??
+                department ??
                 AppLanguage.tr('no_department'),
             'status': record['status'] as String?,
             'checkInTime': null,
@@ -774,7 +774,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                             color: isActive
                                 ? const Color(
                                     0xFF4A1E79,
-                                  ).withOpacity(_isDarkMode ? 0.3 : 0.05)
+                                  ).withValues(alpha: _isDarkMode ? 0.3 : 0.05)
                                 : (_isDarkMode
                                       ? const Color(0xFF2D1B4E)
                                       : Colors.white),
@@ -898,7 +898,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
       PageRouteBuilder(
         transitionDuration: Duration.zero,
         reverseTransitionDuration: Duration.zero,
-        pageBuilder: (context, _, __) => Container(
+        pageBuilder: (context, _, _) => Container(
           color: _isDarkMode
               ? const Color(0xFF1F0B38)
               : const Color(0xFFF8F9FA),
@@ -932,7 +932,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
           PageRouteBuilder(
             transitionDuration: Duration.zero,
             reverseTransitionDuration: Duration.zero,
-            pageBuilder: (context, _, __) => Container(
+            pageBuilder: (context, _, _) => Container(
               color: _isDarkMode
                   ? const Color(0xFF1F0B38)
                   : const Color(0xFFF8F9FA),
@@ -957,7 +957,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
           PageRouteBuilder(
             transitionDuration: Duration.zero,
             reverseTransitionDuration: Duration.zero,
-            pageBuilder: (context, _, __) => Container(
+            pageBuilder: (context, _, _) => Container(
               color: _isDarkMode
                   ? const Color(0xFF1F0B38)
                   : const Color(0xFFF8F9FA),
@@ -1165,7 +1165,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                                 shape: BoxShape.circle,
                                 boxShadow: [
                                   BoxShadow(
-                                    color: Colors.black.withOpacity(0.2),
+                                    color: Colors.black.withValues(alpha: 0.2),
                                     blurRadius: 15,
                                     offset: const Offset(0, 8),
                                   ),
@@ -1248,10 +1248,10 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                                   vertical: 3,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.12),
+                                  color: Colors.white.withValues(alpha: 0.12),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                    color: Colors.white.withOpacity(0.2),
+                                    color: Colors.white.withValues(alpha: 0.2),
                                     width: 1,
                                   ),
                                 ),
@@ -1267,7 +1267,9 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                                           fontSize: 12,
                                           fontWeight: FontWeight.w500,
                                           height: 1.0,
-                                          color: Colors.white.withOpacity(0.95),
+                                          color: Colors.white.withValues(
+                                            alpha: 0.95,
+                                          ),
                                         ),
                                         textAlign: TextAlign.center,
                                         overflow: TextOverflow.ellipsis,
@@ -1276,7 +1278,9 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                                     const SizedBox(width: 4),
                                     Icon(
                                       Icons.keyboard_arrow_down_rounded,
-                                      color: Colors.white.withOpacity(0.8),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.8,
+                                      ),
                                       size: 16,
                                     ),
                                   ],
@@ -1292,7 +1296,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                               vertical: 4,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.2),
+                              color: Colors.white.withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Row(
@@ -1349,7 +1353,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                             borderRadius: BorderRadius.circular(16),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.1),
+                                color: Colors.black.withValues(alpha: 0.1),
                                 blurRadius: 20,
                                 offset: const Offset(0, 10),
                               ),
@@ -1481,7 +1485,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                                       BoxShadow(
                                         color: const Color(
                                           0xFF4A1E79,
-                                        ).withOpacity(0.3),
+                                        ).withValues(alpha: 0.3),
                                         blurRadius: 8,
                                         offset: const Offset(0, 4),
                                       ),
@@ -1556,7 +1560,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                                         (_isDarkMode
                                                 ? const Color(0xFFD0BCFF)
                                                 : const Color(0xFF4A1E79))
-                                            .withOpacity(0.1),
+                                            .withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Text(
@@ -1584,7 +1588,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                                 borderRadius: BorderRadius.circular(16),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: Colors.black.withOpacity(0.05),
+                                    color: Colors.black.withValues(alpha: 0.05),
                                     blurRadius: 10,
                                     offset: const Offset(0, 4),
                                   ),
@@ -1910,11 +1914,11 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
                       (_isDarkMode
                               ? const Color(0xFFD0BCFF)
                               : const Color(0xFF4A1E79))
-                          .withOpacity(_isDarkMode ? 0.25 : 0.15),
+                          .withValues(alpha: _isDarkMode ? 0.25 : 0.15),
                       (_isDarkMode
                               ? const Color(0xFFD0BCFF)
                               : const Color(0xFF4A1E79))
-                          .withOpacity(_isDarkMode ? 0.25 : 0.15),
+                          .withValues(alpha: _isDarkMode ? 0.25 : 0.15),
                     ],
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
@@ -1955,7 +1959,7 @@ class _PetugasDashboardPageState extends State<PetugasDashboardPage> {
           BoxShadow(
             color: _isDarkMode
                 ? Colors.black26
-                : Colors.black.withOpacity(0.05),
+                : Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),

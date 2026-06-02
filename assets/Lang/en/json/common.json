@@ -135,5 +135,7 @@
     "thu_short": "Thu",
     "fri_short": "Fri",
     "sat_short": "Sat",
-    "sun_short": "Sun"
+    "sun_short": "Sun",
+    "export_report": "Export Report",
+    "export_report_subtitle": "Export attendance data to PDF or Excel"
 }

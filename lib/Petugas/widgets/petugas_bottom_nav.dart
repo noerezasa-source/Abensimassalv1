@@ -126,7 +126,7 @@ class PetugasBottomNav extends StatelessWidget {
                     height: 70,
                     decoration: BoxDecoration(
                       color: isDarkMode
-                          ? _getAttendanceColor().withOpacity(0.8)
+                          ? _getAttendanceColor().withValues(alpha: 0.8)
                           : _getAttendanceColor(),
                       shape: BoxShape.circle,
                       border: Border.all(

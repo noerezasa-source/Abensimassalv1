@@ -54,6 +54,7 @@ class LanguageHelper {
         'selfie',
         'device_selection',
         'fingerprint',
+        'face_registration',
       ], // Attendance subfolder
     };
 

@@ -19,5 +19,8 @@
     "photo_updated": "Profile photo updated successfully",
     "photo_failed": "Failed to update photo",
     "profile_updated": "Profile updated successfully",
-    "profile_failed": "Failed to update profile"
+    "profile_failed": "Failed to update profile",
+    "timezone_settings": "Timezone Settings",
+    "current_timezone": "Current Timezone",
+    "current_time_preview": "Current time"
 }

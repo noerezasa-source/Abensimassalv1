@@ -1,0 +1,22 @@
+{
+    "welcome": "Welcome! We will register your face now.",
+    "step1_instruction": "Step one. Look straight at the camera.",
+    "step2_instruction": "Great! Now turn your head to the left.",
+    "step3_instruction": "Perfect! Now turn your head to the right.",
+    "hold_position": "Hold your position. Do not move.",
+    "capturing": "Taking photo.",
+    "step_done_front": "Front face captured successfully.",
+    "step_done_left": "Left side captured successfully.",
+    "step_done_right": "Right side captured successfully.",
+    "saving": "Saving your face data.",
+    "complete": "Face registration complete! Thank you.",
+    "eyes_closed": "Please open your eyes.",
+    "look_straight": "Look straight ahead.",
+    "turn_left": "Turn your head to the left.",
+    "turn_right": "Turn your head to the right.",
+    "face_not_found": "Face not detected. Please point your face to the camera.",
+    "multiple_faces": "Multiple faces detected. Please ensure only one face is in the camera.",
+    "quality_low": "Image quality is low. Please ensure good lighting.",
+    "too_far": "Too far. Please move closer to the camera.",
+    "tilt_head": "Do not tilt your head."
+}

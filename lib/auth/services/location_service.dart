@@ -1,6 +1,5 @@
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz_data;
-import 'package:device_info_plus/device_info_plus.dart';
 
 class LocationService {
   static bool _initialized = false;

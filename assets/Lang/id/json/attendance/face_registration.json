@@ -1,0 +1,22 @@
+{
+    "welcome": "Selamat datang! Kita akan mendaftarkan wajah Anda sekarang.",
+    "step1_instruction": "Tahap satu. Hadapkan wajah lurus ke kamera.",
+    "step2_instruction": "Bagus! Sekarang tolehkan kepala ke kiri.",
+    "step3_instruction": "Sempurna! Sekarang tolehkan kepala ke kanan.",
+    "hold_position": "Tahan posisi. Jangan bergerak.",
+    "capturing": "Mengambil foto.",
+    "step_done_front": "Wajah depan berhasil direkam.",
+    "step_done_left": "Wajah kiri berhasil direkam.",
+    "step_done_right": "Wajah kanan berhasil direkam.",
+    "saving": "Menyimpan data wajah Anda.",
+    "complete": "Registrasi wajah selesai! Terima kasih.",
+    "eyes_closed": "Buka mata Anda.",
+    "look_straight": "Lihat lurus ke depan.",
+    "turn_left": "Tolehkan kepala ke kiri.",
+    "turn_right": "Tolehkan kepala ke kanan.",
+    "face_not_found": "Wajah tidak terdeteksi. Arahkan wajah ke kamera.",
+    "multiple_faces": "Terdeteksi lebih dari satu wajah. Pastikan hanya satu wajah di kamera.",
+    "quality_low": "Kualitas gambar kurang baik. Pastikan pencahayaan cukup.",
+    "too_far": "Terlalu jauh. Dekatkan wajah ke kamera.",
+    "tilt_head": "Jangan miringkan kepala."
+}

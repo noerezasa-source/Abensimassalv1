@@ -434,7 +434,7 @@ class _SelfieAttendanceFlowPageState extends State<SelfieAttendanceFlowPage> {
         'photo_url': photoUrl, // ← INI YANG PALING PENTING!
         'latitude': latitude,
         'longitude': longitude,
-        if (accuracy != null) 'accuracy': accuracy,
+        'accuracy': ?accuracy,
         if (locationData['type'] == 'device')
           'device_id':
               (locationData['selectedDevice'] as AttendanceDevice?)?.id,
@@ -598,7 +598,7 @@ class _SelfieAttendanceFlowPageState extends State<SelfieAttendanceFlowPage> {
               Positioned.fill(
                 child: BackdropFilter(
                   filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-                  child: Container(color: Colors.black.withOpacity(0.6)),
+                  child: Container(color: Colors.black.withValues(alpha: 0.6)),
                 ),
               ),
               Center(
@@ -609,15 +609,15 @@ class _SelfieAttendanceFlowPageState extends State<SelfieAttendanceFlowPage> {
                     horizontal: 24,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1E1B2E).withOpacity(0.95),
+                    color: const Color(0xFF1E1B2E).withValues(alpha: 0.95),
                     borderRadius: BorderRadius.circular(32),
                     border: Border.all(
-                      color: Colors.white.withOpacity(0.1),
+                      color: Colors.white.withValues(alpha: 0.1),
                       width: 1,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.5),
+                        color: Colors.black.withValues(alpha: 0.5),
                         blurRadius: 40,
                         offset: const Offset(0, 20),
                       ),
@@ -723,7 +723,7 @@ class _SelfieAttendanceFlowPageState extends State<SelfieAttendanceFlowPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
+        color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Row(
@@ -731,7 +731,7 @@ class _SelfieAttendanceFlowPageState extends State<SelfieAttendanceFlowPage> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: const Color(0xFF8B5CF6).withOpacity(0.2),
+              color: const Color(0xFF8B5CF6).withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon, color: const Color(0xFFA78BFA), size: 18),
@@ -740,7 +740,7 @@ class _SelfieAttendanceFlowPageState extends State<SelfieAttendanceFlowPage> {
           Text(
             label,
             style: TextStyle(
-              color: Colors.white.withOpacity(0.6),
+              color: Colors.white.withValues(alpha: 0.6),
               fontSize: 14,
             ),
           ),
@@ -861,7 +861,7 @@ class ActionSelectionBottomSheet extends StatelessWidget {
             height: 4,
             margin: const EdgeInsets.only(bottom: 20),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
+              color: Colors.white.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -918,8 +918,12 @@ class ActionSelectionBottomSheet extends StatelessWidget {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.orange,
                     foregroundColor: Colors.white,
-                    disabledBackgroundColor: Colors.white.withOpacity(0.1),
-                    disabledForegroundColor: Colors.white.withOpacity(0.5),
+                    disabledBackgroundColor: Colors.white.withValues(
+                      alpha: 0.1,
+                    ),
+                    disabledForegroundColor: Colors.white.withValues(
+                      alpha: 0.5,
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -943,8 +947,12 @@ class ActionSelectionBottomSheet extends StatelessWidget {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blue,
                     foregroundColor: Colors.white,
-                    disabledBackgroundColor: Colors.white.withOpacity(0.1),
-                    disabledForegroundColor: Colors.white.withOpacity(0.5),
+                    disabledBackgroundColor: Colors.white.withValues(
+                      alpha: 0.1,
+                    ),
+                    disabledForegroundColor: Colors.white.withValues(
+                      alpha: 0.5,
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),

@@ -108,7 +108,7 @@ class _MemberSelectionPageState extends State<MemberSelectionPage> {
             id,
             employee_id,
             user_id,
-            user_profiles!inner(
+            user_profiles(
               display_name,
               first_name,
               last_name,
@@ -327,7 +327,7 @@ class _MemberSelectionPageState extends State<MemberSelectionPage> {
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
                       valueColor: AlwaysStoppedAnimation<Color>(
-                        primaryColor.withOpacity(0.5),
+                        primaryColor.withValues(alpha: 0.5),
                       ),
                     ),
                   ),

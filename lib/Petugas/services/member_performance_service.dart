@@ -97,34 +97,31 @@ class MemberPerformanceService {
       final fromIndex = (page - 1) * limit;
       final toIndex = fromIndex + limit - 1;
 
-      // Base query
-      String selectStr =
-          '''
+      // Simplified query - PostgREST will auto-resolve FK relationships
+      // Use left join (no !inner) for user_profiles so members always show
+      // even if user_profiles record is missing
+      const selectStr = '''
             id,
             user_id,
             role_id,
             department_id,
             employee_id,
             is_active,
-            user_profiles!inner(
+            user_profiles(
               id,
               display_name,
               first_name,
               last_name,
               profile_photo_url
             ),
-            departments!organization_members_department_id_fkey${departmentFilter != null && departmentFilter.toLowerCase() != 'all' ? '!inner' : ''}(
+            departments(
               id,
               name
             ),
-            system_roles!organization_members_role_id_fkey(
+            system_roles(
               id,
               name,
               code
-            ),
-            positions(
-              id,
-              title
             ),
             biometric_data(
               id,
@@ -143,13 +140,10 @@ class MemberPerformanceService {
         query = query.eq('is_active', true);
       }
 
-      // Apply filters if provided
-      if (searchQuery != null && searchQuery.isNotEmpty) {
-        query = query.ilike('user_profiles.display_name', '%$searchQuery%');
-      }
-
+      // Apply search filter in-memory after fetch (safer than DB-side for profiles)
+      // Apply department filter in DB only if column exists
       if (departmentFilter != null && departmentFilter.toLowerCase() != 'all') {
-        query = query.eq('departments.name', departmentFilter);
+        query = query.eq('department_id', departmentFilter);
       }
 
       // Execute query with range
@@ -159,7 +153,7 @@ class MemberPerformanceService {
 
       debugPrint('Members fetched: ${response.length}');
 
-      final members = List<Map<String, dynamic>>.from(response);
+      var members = List<Map<String, dynamic>>.from(response);
 
       // Add member names and process roles for easier access
       for (final member in members) {
@@ -171,14 +165,21 @@ class MemberPerformanceService {
         member['role_code'] = role?['code'] ?? 'US001';
       }
 
-      // In-memory filter for search/department if backend filtering is complex
-      // (For proper pagination with filters, we should really filter on DB side)
-      // This is a basic implementation of pagination.
+      // In-memory search filter (safer than DB-side filtering via joined tables)
+      if (searchQuery != null && searchQuery.isNotEmpty) {
+        final q = searchQuery.toLowerCase();
+        members = members.where((m) {
+          final name = (m['member_name'] as String? ?? '').toLowerCase();
+          final empId = (m['employee_id'] as String? ?? '').toLowerCase();
+          return name.contains(q) || empId.contains(q);
+        }).toList();
+      }
 
       return members;
     } catch (e) {
       debugPrint('!!! ERROR in getOrganizationMembers: $e');
-      return [];
+      // Re-throw so the UI can surface the actual error message
+      rethrow;
     }
   }
 
@@ -190,30 +191,13 @@ class MemberPerformanceService {
     bool includeInactive = false,
   }) async {
     try {
-      String selectStr = 'id';
-      if (searchQuery != null && searchQuery.isNotEmpty) {
-        selectStr += ', user_profiles!inner(id)';
-      }
-      if (departmentFilter != null && departmentFilter.toLowerCase() != 'all') {
-        selectStr +=
-            ', departments!organization_members_department_id_fkey!inner(id)';
-      }
-
       var query = _supabase
           .from('organization_members')
-          .select(selectStr)
+          .select('id')
           .eq('organization_id', organizationId);
 
       if (!includeInactive) {
         query = query.eq('is_active', true);
-      }
-
-      if (searchQuery != null && searchQuery.isNotEmpty) {
-        query = query.ilike('user_profiles.display_name', '%$searchQuery%');
-      }
-
-      if (departmentFilter != null && departmentFilter.toLowerCase() != 'all') {
-        query = query.eq('departments.name', departmentFilter);
       }
 
       final response = await query.count(CountOption.exact);
@@ -223,6 +207,7 @@ class MemberPerformanceService {
       return 0;
     }
   }
+
 
   /// Get performance statistics for members within a date range
   Future<Map<String, dynamic>> getPerformanceStats(

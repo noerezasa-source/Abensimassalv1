@@ -116,7 +116,7 @@ class _SyncStatusDialogState extends State<SyncStatusDialog>
             borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.15),
+                color: Colors.black.withValues(alpha: 0.15),
                 blurRadius: 30,
                 offset: const Offset(0, -4),
               ),
@@ -218,7 +218,7 @@ class _SyncStatusDialogState extends State<SyncStatusDialog>
                     child: LinearProgressIndicator(
                       value: total > 0 ? progress / total : null,
                       minHeight: 6,
-                      backgroundColor: accentColor.withOpacity(0.1),
+                      backgroundColor: accentColor.withValues(alpha: 0.1),
                       valueColor: AlwaysStoppedAnimation<Color>(accentColor),
                     ),
                   ),
@@ -231,8 +231,8 @@ class _SyncStatusDialogState extends State<SyncStatusDialog>
                     height: 4,
                     decoration: BoxDecoration(
                       color: isError
-                          ? errorColor.withOpacity(0.2)
-                          : successColor.withOpacity(0.2),
+                          ? errorColor.withValues(alpha: 0.2)
+                          : successColor.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(2),
                     ),
                     child: FractionallySizedBox(
@@ -275,7 +275,7 @@ class _SyncStatusDialogState extends State<SyncStatusDialog>
                           vertical: 2,
                         ),
                         decoration: BoxDecoration(
-                          color: accentColor.withOpacity(0.1),
+                          color: accentColor.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(100),
                         ),
                         child: Text(
@@ -323,7 +323,7 @@ class _SyncStatusDialogState extends State<SyncStatusDialog>
                           width: 72,
                           height: 72,
                           decoration: BoxDecoration(
-                            color: successColor.withOpacity(0.1),
+                            color: successColor.withValues(alpha: 0.1),
                             shape: BoxShape.circle,
                           ),
                           child: Icon(
@@ -422,7 +422,7 @@ class _SyncStatusDialogState extends State<SyncStatusDialog>
           width: 44,
           height: 44,
           decoration: BoxDecoration(
-            color: accentColor.withOpacity(0.1),
+            color: accentColor.withValues(alpha: 0.1),
             shape: BoxShape.circle,
           ),
           child: Center(
@@ -445,8 +445,8 @@ class _SyncStatusDialogState extends State<SyncStatusDialog>
       height: 44,
       decoration: BoxDecoration(
         color: isError
-            ? errorColor.withOpacity(0.1)
-            : successColor.withOpacity(0.1),
+            ? errorColor.withValues(alpha: 0.1)
+            : successColor.withValues(alpha: 0.1),
         shape: BoxShape.circle,
       ),
       child: Icon(
@@ -473,11 +473,11 @@ class _SyncStatusDialogState extends State<SyncStatusDialog>
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: isDarkMode ? Colors.white.withOpacity(0.05) : Colors.white,
+        color: isDarkMode ? Colors.white.withValues(alpha: 0.05) : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isSynced
-              ? successColor.withOpacity(0.2)
+              ? successColor.withValues(alpha: 0.2)
               : Colors.grey.shade100,
           width: 1,
         ),
@@ -485,7 +485,7 @@ class _SyncStatusDialogState extends State<SyncStatusDialog>
             ? null
             : [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.04),
+                  color: Colors.black.withValues(alpha: 0.04),
                   blurRadius: 6,
                   offset: const Offset(0, 1),
                 ),
@@ -579,7 +579,7 @@ class _SyncStatusDialogState extends State<SyncStatusDialog>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(

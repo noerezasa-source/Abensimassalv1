@@ -967,15 +967,12 @@ class AttendanceService {
           organization_members!inner(
             id,
             organization_id,
-            department_id,
+            department,
             user_profiles!inner(
               display_name,
               first_name,
               last_name,
               profile_photo_url
-            ),
-            departments!organization_members_department_id_fkey(
-              name
             )
           ),
           attendance_records!left(

@@ -1339,7 +1339,7 @@ class _DeviceSelectionScreenState extends State<DeviceSelectionScreen> {
                     return Container(
                       decoration: BoxDecoration(
                         color: isSelected
-                            ? primaryColor.withOpacity(0.05)
+                            ? primaryColor.withValues(alpha: 0.05)
                             : Colors.white,
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
@@ -1391,7 +1391,9 @@ class _DeviceSelectionScreenState extends State<DeviceSelectionScreen> {
                                         style: TextStyle(
                                           fontSize: 13,
                                           color: isSelected
-                                              ? primaryColor.withOpacity(0.7)
+                                              ? primaryColor.withValues(
+                                                  alpha: 0.7,
+                                                )
                                               : subtitleColor,
                                         ),
                                       ),

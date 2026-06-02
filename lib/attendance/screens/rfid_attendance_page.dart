@@ -514,7 +514,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                         controller: scrollController,
                         padding: const EdgeInsets.symmetric(horizontal: 24),
                         itemCount: _availableModes.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        separatorBuilder: (_, _) => const Divider(height: 1),
                         itemBuilder: (_, index) {
                           final mode = _availableModes[index];
                           final start = mode['start_time'] as String?;
@@ -1603,7 +1603,9 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                           borderRadius: BorderRadius.circular(16),
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFF9333EA).withOpacity(0.4),
+                              color: const Color(
+                                0xFF9333EA,
+                              ).withValues(alpha: 0.4),
                               blurRadius: 20,
                               offset: const Offset(0, 10),
                             ),
@@ -1614,7 +1616,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                             Container(
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.2),
+                                color: Colors.white.withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: const Icon(
@@ -1667,9 +1669,10 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
                                         border: Border.all(
-                                          color: const Color(
-                                            0xFF9333EA,
-                                          ).withOpacity(0.1 * (1 - value)),
+                                          color: const Color(0xFF9333EA)
+                                              .withValues(
+                                                alpha: 0.1 * (1 - value),
+                                              ),
                                           width: 1,
                                         ),
                                       ),
@@ -1685,7 +1688,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                                     shape: BoxShape.circle,
                                     color: const Color(
                                       0xFF9333EA,
-                                    ).withOpacity(0.05),
+                                    ).withValues(alpha: 0.05),
                                   ),
                                 ),
                                 Container(
@@ -1737,7 +1740,7 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                             vertical: 8,
                           ),
                           itemCount: _filteredEntries.length,
-                          separatorBuilder: (_, __) =>
+                          separatorBuilder: (_, _) =>
                               const SizedBox(height: 12),
                           itemBuilder: (_, index) =>
                               _buildNewEntryCard(_filteredEntries[index]),
@@ -1893,7 +1896,9 @@ class _RfidAttendancePageState extends State<RfidAttendancePage> {
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
                               color: isSelected
-                                  ? const Color(0xFF9333EA).withOpacity(0.1)
+                                  ? const Color(
+                                      0xFF9333EA,
+                                    ).withValues(alpha: 0.1)
                                   : Colors.grey.shade100,
                               shape: BoxShape.circle,
                             ),

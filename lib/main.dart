@@ -6,7 +6,6 @@ import 'package:absensimassal/auth/screens/join_organization_screen.dart';
 import 'package:absensimassal/Petugas/screens/petugas_dashboard.dart';
 import 'package:absensimassal/User/screens/user_dashboard.dart';
 import 'package:absensimassal/auth/services/role_service.dart';
-import 'package:absensimassal/auth/services/location_service.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -62,9 +61,8 @@ Future<void> main() async {
 
   // Backend API atau bisa juga inisialisasi supobase
   await Supabase.initialize(
-    url: 'https://oxkuxwkehinhyxfsauqe.supabase.co',
-    anonKey:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im94a3V4d2tlaGluaHl4ZnNhdXFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc5NDYxOTMsImV4cCI6MjA3MzUyMjE5M30.g3BjGtZCSFxnBDwMWkaM2mEcnCkoDL92fvTP_gUgR20',
+    url: 'https://oovtwiioyejefifsgrtj.supabase.co',
+    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9vdnR3aWlveWVqZWZpZnNncnRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwMTY0MTYsImV4cCI6MjA5NTU5MjQxNn0.BpXzBmlvLZX7f4bRK8IG_JHUKU5qHTsHQ1A2VL-eQZM', // Replace with the JWT anon key from Supabase
   );
   await AppLanguage.init();
   await initializeDateFormatting('id_ID', null);

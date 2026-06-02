@@ -136,5 +136,7 @@
     "thu_short": "خميس",
     "fri_short": "جمعة",
     "sat_short": "سبت",
-    "sun_short": "أحد"
+    "sun_short": "أحد",
+    "export_report": "تصدير التقرير",
+    "export_report_subtitle": "تصدير بيانات الحضور إلى PDF أو Excel"
 }

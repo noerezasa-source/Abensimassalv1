@@ -109,7 +109,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
           PageRouteBuilder(
             transitionDuration: Duration.zero,
             reverseTransitionDuration: Duration.zero,
-            pageBuilder: (context, _, __) => Container(
+            pageBuilder: (context, _, _) => Container(
               color: widget.isDarkMode
                   ? const Color(0xFF1F0B38)
                   : const Color(0xFFF8F9FA),
@@ -136,7 +136,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
           PageRouteBuilder(
             transitionDuration: Duration.zero,
             reverseTransitionDuration: Duration.zero,
-            pageBuilder: (context, _, __) => Container(
+            pageBuilder: (context, _, _) => Container(
               color: widget.isDarkMode
                   ? const Color(0xFF1F0B38)
                   : const Color(0xFFF8F9FA),
@@ -524,12 +524,12 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Logout'),
-        content: const Text('Are you sure you want to logout?'),
+        title: Text(AppLanguage.tr('logout_confirm_title')),
+        content: Text(AppLanguage.tr('logout_confirm_message')),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(AppLanguage.tr('cancel')),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
@@ -537,7 +537,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
             ),
-            child: const Text('Logout'),
+            child: Text(AppLanguage.tr('logout_account')),
           ),
         ],
       ),
@@ -557,7 +557,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Logout failed: $e'),
+              content: Text('${AppLanguage.tr('logout_account')} failed: $e'),
               backgroundColor: Colors.red,
             ),
           );
@@ -685,7 +685,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
                                   decoration: BoxDecoration(
                                     color: const Color(
                                       0xFF2196F3,
-                                    ).withOpacity(0.1),
+                                    ).withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: const Icon(
@@ -693,13 +693,13 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
                                     color: Color.fromARGB(255, 103, 45, 196),
                                   ),
                                 ),
-                                title: const Text(
-                                  'Export Laporan',
-                                  style: TextStyle(fontWeight: FontWeight.w600),
+                                title: Text(
+                                  AppLanguage.tr('export_report'),
+                                  style: const TextStyle(fontWeight: FontWeight.w600),
                                 ),
-                                subtitle: const Text(
-                                  'Export data absensi ke PDF atau Excel',
-                                  style: TextStyle(fontSize: 12),
+                                subtitle: Text(
+                                  AppLanguage.tr('export_report_subtitle'),
+                                  style: const TextStyle(fontSize: 12),
                                 ),
                                 trailing: const Icon(
                                   Icons.chevron_right,
@@ -728,10 +728,10 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
                               child: ElevatedButton.icon(
                                 onPressed: _handleLogout,
                                 icon: const Icon(Icons.logout),
-                                label: const Text('Logout'),
+                                label: Text(AppLanguage.tr('logout_account')),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: widget.isDarkMode
-                                      ? Colors.red.withOpacity(0.15)
+                                      ? Colors.red.withValues(alpha: 0.15)
                                       : Colors.red.shade50,
                                   foregroundColor: widget.isDarkMode
                                       ? Colors.redAccent.shade100
@@ -743,8 +743,8 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(15),
                                     side: BorderSide(
-                                      color: Colors.red.withOpacity(
-                                        widget.isDarkMode ? 0.3 : 0.2,
+                                      color: Colors.red.withValues(
+                                        alpha: widget.isDarkMode ? 0.3 : 0.2,
                                       ),
                                     ),
                                   ),
@@ -1069,7 +1069,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
             style: TextStyle(
               fontSize: 15,
               color: widget.isDarkMode
-                  ? Colors.white.withOpacity(0.7)
+                  ? Colors.white.withValues(alpha: 0.7)
                   : Colors.grey.shade700,
               fontWeight: FontWeight.w500,
             ),
@@ -1095,8 +1095,8 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
       height: 1,
       thickness: 1,
       color: widget.isDarkMode
-          ? Colors.white.withOpacity(0.05)
-          : Colors.grey.withOpacity(0.1),
+          ? Colors.white.withValues(alpha: 0.05)
+          : Colors.grey.withValues(alpha: 0.1),
     );
   }
 
@@ -1132,7 +1132,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
               isDense: true,
               filled: true,
               fillColor: widget.isDarkMode
-                  ? Colors.white.withOpacity(0.05)
+                  ? Colors.white.withValues(alpha: 0.05)
                   : Colors.grey.shade50,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -1253,7 +1253,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
                 ),
                 borderRadius: BorderRadius.circular(12),
                 color: widget.isDarkMode
-                    ? Colors.white.withOpacity(0.05)
+                    ? Colors.white.withValues(alpha: 0.05)
                     : Colors.grey.shade50,
               ),
               child: Row(
@@ -1296,7 +1296,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 10,
               offset: const Offset(0, 4),
             ),
@@ -1309,7 +1309,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF8938DF).withOpacity(0.1),
+                    color: const Color(0xFF8938DF).withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(
@@ -1365,8 +1365,8 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
                         ),
                         decoration: BoxDecoration(
                           color: _hasRegisteredFace
-                              ? Colors.green.withOpacity(0.1)
-                              : Colors.orange.withOpacity(0.1),
+                              ? Colors.green.withValues(alpha: 0.1)
+                              : Colors.orange.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(
@@ -1442,7 +1442,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 10,
               offset: const Offset(0, 4),
             ),
@@ -1456,7 +1456,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF8938DF).withOpacity(0.1),
+                    color: const Color(0xFF8938DF).withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(
@@ -1489,7 +1489,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
                 ),
                 decoration: BoxDecoration(
                   color: widget.isDarkMode
-                      ? Colors.white.withOpacity(0.05)
+                      ? Colors.white.withValues(alpha: 0.05)
                       : Colors.grey.shade50,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
@@ -1591,9 +1591,9 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: isSelected
-                ? const Color(0xFF8938DF).withOpacity(0.1)
+                ? const Color(0xFF8938DF).withValues(alpha: 0.1)
                 : (widget.isDarkMode
-                      ? Colors.white.withOpacity(0.05)
+                      ? Colors.white.withValues(alpha: 0.05)
                       : Colors.grey.shade50),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
@@ -1608,7 +1608,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
                 decoration: BoxDecoration(
                   color: isSelected
                       ? const Color(0xFF8938DF)
-                      : Colors.grey.withOpacity(0.1),
+                      : Colors.grey.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
@@ -1642,7 +1642,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.orange.withOpacity(0.1),
+                              color: Colors.orange.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: const Text(
@@ -1700,7 +1700,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
             width: 40,
             height: 4,
             decoration: BoxDecoration(
-              color: Colors.grey.withOpacity(0.3),
+              color: Colors.grey.withValues(alpha: 0.3),
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -1730,7 +1730,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 10,
               offset: const Offset(0, 4),
             ),
@@ -1744,7 +1744,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF8938DF).withOpacity(0.1),
+                    color: const Color(0xFF8938DF).withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(
@@ -1772,7 +1772,9 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
               builder: (context, currentLang, _) {
                 String langName = currentLang == LanguageHelper.indonesian
                     ? 'Bahasa Indonesia'
-                    : (currentLang == LanguageHelper.english ? 'English' : 'العربية');
+                    : (currentLang == LanguageHelper.english
+                          ? 'English'
+                          : 'العربية');
                 String flag = currentLang == LanguageHelper.indonesian
                     ? '🇮🇩'
                     : (currentLang == LanguageHelper.english ? '🇺🇸' : '🇸🇦');
@@ -1787,7 +1789,7 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
                     ),
                     decoration: BoxDecoration(
                       color: widget.isDarkMode
-                          ? Colors.white.withOpacity(0.05)
+                          ? Colors.white.withValues(alpha: 0.05)
                           : Colors.grey.shade50,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
@@ -1880,9 +1882,9 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: isSelected
-                ? const Color(0xFF8938DF).withOpacity(0.1)
+                ? const Color(0xFF8938DF).withValues(alpha: 0.1)
                 : (widget.isDarkMode
-                      ? Colors.white.withOpacity(0.05)
+                      ? Colors.white.withValues(alpha: 0.05)
                       : Colors.grey.shade50),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
@@ -1897,15 +1899,13 @@ class _PetugasProfilePageState extends State<PetugasProfilePage> {
                 height: 44,
                 decoration: BoxDecoration(
                   color: widget.isDarkMode
-                      ? Colors.white.withOpacity(0.1)
-                      : Colors.grey.withOpacity(0.1),
+                      ? Colors.white.withValues(alpha: 0.1)
+                      : Colors.grey.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Center(
                   child: Text(
-                    code == 'id'
-                        ? '🇮🇩'
-                        : (code == 'en' ? '🇺🇸' : '🇸🇦'),
+                    code == 'id' ? '🇮🇩' : (code == 'en' ? '🇺🇸' : '🇸🇦'),
                     style: const TextStyle(fontSize: 24),
                   ),
                 ),

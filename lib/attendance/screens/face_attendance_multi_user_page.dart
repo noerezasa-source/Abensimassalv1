@@ -17,7 +17,6 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import '../services/attendance_service.dart';
 import '../../helpers/sound_helper.dart';
 import '../../helpers/timezone_helper.dart';
-import '../../services/supabase_storage_service.dart';
 import '../../services/offline_database_service.dart';
 import '../services/attendance_sync_service.dart';
 import '../../models/offline_attendance.dart';
@@ -107,7 +106,8 @@ class _FaceAttendanceMultiUserPageState
 
   bool _isCameraInitialized = false;
   bool _isProcessing = false;
-  final bool _isTakingPicture = false; // ✅ NEW: Prevent concurrent camera captures
+  final bool _isTakingPicture =
+      false; // ✅ NEW: Prevent concurrent camera captures
   String? _currentMessage;
   MessageType _messageType = MessageType.idle;
   Position? _currentPosition;
@@ -284,14 +284,16 @@ class _FaceAttendanceMultiUserPageState
     final result = await Connectivity().checkConnectivity();
     if (mounted) {
       setState(() {
-        _isOnline = result.isNotEmpty && !result.contains(ConnectivityResult.none);
+        _isOnline =
+            result.isNotEmpty && !result.contains(ConnectivityResult.none);
       });
     }
 
     Connectivity().onConnectivityChanged.listen((results) {
       if (mounted) {
         setState(() {
-          _isOnline = results.isNotEmpty && !results.contains(ConnectivityResult.none);
+          _isOnline =
+              results.isNotEmpty && !results.contains(ConnectivityResult.none);
         });
       }
     });
@@ -504,10 +506,14 @@ class _FaceAttendanceMultiUserPageState
 
   Future<void> _refreshTemplates() async {
     if (_isRefreshing || _isProcessing) return;
-    
+
     setState(() {
       _isRefreshing = true;
-      _showMessage('Menyegarkan data wajah...', MessageType.loading, seconds: 60); // Long timeout
+      _showMessage(
+        'Menyegarkan data wajah...',
+        MessageType.loading,
+        seconds: 60,
+      ); // Long timeout
     });
 
     try {
@@ -526,7 +532,6 @@ class _FaceAttendanceMultiUserPageState
       }
     }
   }
-
 
   Future<void> _loadOrganizationData() async {
     final orgId = widget.organizationId;
@@ -902,7 +907,6 @@ class _FaceAttendanceMultiUserPageState
     DeviceOrientation.portraitDown: 180,
     DeviceOrientation.landscapeRight: 270,
   };
-
 
   // ✅ REFACTORED: State Machine Core Logic
   Future<void> _handleStreamFaces(List<Face> faces, Size imageSize) async {
@@ -1751,7 +1755,7 @@ class _FaceAttendanceMultiUserPageState
                         controller: scrollController,
                         padding: const EdgeInsets.symmetric(horizontal: 24),
                         itemCount: _availableModes.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        separatorBuilder: (_, _) => const Divider(height: 1),
                         itemBuilder: (_, index) {
                           final mode = _availableModes[index];
                           final start = mode['start_time'] as String?;
@@ -2261,7 +2265,9 @@ class _FaceAttendanceMultiUserPageState
                   const SizedBox(width: 10),
                   // Refresh Button
                   _buildCircularActionButton(
-                    icon: _isRefreshing ? Icons.hourglass_empty : Icons.refresh_rounded,
+                    icon: _isRefreshing
+                        ? Icons.hourglass_empty
+                        : Icons.refresh_rounded,
                     onTap: _isRefreshing ? () {} : _refreshTemplates,
                   ),
                   const SizedBox(width: 10),

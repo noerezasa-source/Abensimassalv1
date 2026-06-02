@@ -297,9 +297,12 @@ class _CameraSelfieScreenState extends State<CameraSelfieScreen>
         height: 64,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: isFill ? Colors.white : Colors.black.withOpacity(0.2),
+          color: isFill ? Colors.white : Colors.black.withValues(alpha: 0.2),
           border: isOutline
-              ? Border.all(color: Colors.white.withOpacity(0.5), width: 1.5)
+              ? Border.all(
+                  color: Colors.white.withValues(alpha: 0.5),
+                  width: 1.5,
+                )
               : null,
         ),
         child: Icon(
@@ -318,10 +321,13 @@ class _CameraSelfieScreenState extends State<CameraSelfieScreen>
         padding: const EdgeInsets.all(4),
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          border: Border.all(color: primaryColor.withOpacity(0.8), width: 4),
+          border: Border.all(
+            color: primaryColor.withValues(alpha: 0.8),
+            width: 4,
+          ),
           boxShadow: [
             BoxShadow(
-              color: primaryColor.withOpacity(0.4),
+              color: primaryColor.withValues(alpha: 0.4),
               blurRadius: 20,
               spreadRadius: 2,
             ),

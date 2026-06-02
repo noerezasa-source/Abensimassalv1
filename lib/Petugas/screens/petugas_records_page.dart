@@ -394,7 +394,7 @@ class _PetugasRecordsPageState extends State<PetugasRecordsPage> {
         Navigator.pushReplacement(
           context,
           PageRouteBuilder(
-            pageBuilder: (_, __, ___) => PetugasDashboardPage(
+            pageBuilder: (_, _, _) => PetugasDashboardPage(
               organizationMemberId: widget.organizationMemberId,
               memberData: widget.memberData,
               userProfile: widget.userProfile,
@@ -410,7 +410,7 @@ class _PetugasRecordsPageState extends State<PetugasRecordsPage> {
           PageRouteBuilder(
             transitionDuration: Duration.zero,
             reverseTransitionDuration: Duration.zero,
-            pageBuilder: (_, __, ___) => Container(
+            pageBuilder: (_, _, _) => Container(
               color: widget.isDarkMode
                   ? const Color(0xFF1F0B38)
                   : const Color(0xFFF8F9FA),
@@ -433,7 +433,7 @@ class _PetugasRecordsPageState extends State<PetugasRecordsPage> {
           PageRouteBuilder(
             transitionDuration: Duration.zero,
             reverseTransitionDuration: Duration.zero,
-            pageBuilder: (_, __, ___) => Container(
+            pageBuilder: (_, _, _) => Container(
               color: widget.isDarkMode
                   ? const Color(0xFF1F0B38)
                   : const Color(0xFFF8F9FA),

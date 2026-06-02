@@ -599,7 +599,7 @@ class _ModernLoginScreenState extends State<ModernLoginScreen> {
                                 BoxShadow(
                                   color: const Color(
                                     0xFF673AB7,
-                                  ).withOpacity(0.2),
+                                  ).withValues(alpha: 0.2),
                                   blurRadius: 15,
                                   offset: const Offset(0, 8),
                                 ),
@@ -754,7 +754,7 @@ class _ModernLoginScreenState extends State<ModernLoginScreen> {
       style: TextStyle(
         fontSize: 12,
         fontWeight: FontWeight.bold,
-        color: Colors.blueGrey.shade800.withOpacity(0.6),
+        color: Colors.blueGrey.shade800.withValues(alpha: 0.6),
         letterSpacing: 0.5,
       ),
     );

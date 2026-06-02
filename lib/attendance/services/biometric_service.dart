@@ -68,25 +68,19 @@ class BiometricService {
 
       // Version is stored INSIDE the JSON, not as separate column
       final version = faceTemplate['version'] ?? 3;
-      /*
-      // \u2705 NEW: Log ISO compliance features for version 3.1
-      if (version == 3.1) {
-        debugPrint('\u2705 ISO/IEC Compliant Template:');
-        debugPrint('  - Biometric Metrics: ${faceTemplate['biometricMetrics'] != null}');
-        debugPrint('  - Quality Metrics: ${faceTemplate['qualityMetrics'] != null}');
-        debugPrint('  - Liveness Detection: ${faceTemplate['livenessDetection'] != null}');
-        debugPrint('  - Pose Information: ${faceTemplate['poseInformation'] != null}');
-      }
-      */
 
-      /*
-      // Check if this is multi-template (version 4)
-      final isMultiTemplate = version == 4;
-      if (isMultiTemplate) {
-        final templates = faceTemplate['templates'] as List?;
-        debugPrint('Multi-template registration: ${templates?.length ?? 0} templates');
+      // Lookup organization_id dari organization_members (diperlukan oleh beberapa schema DB)
+      int? organizationId;
+      try {
+        final memberRow = await _supabase
+            .from('organization_members')
+            .select('organization_id')
+            .eq('id', organizationMemberId)
+            .maybeSingle();
+        organizationId = memberRow?['organization_id'] as int?;
+      } catch (_) {
+        // Jika gagal lookup, biarkan null (jika kolom sudah nullable)
       }
-      */
 
       // Deactivate old templates
       final existingTemplate = await _supabase
@@ -104,15 +98,17 @@ class BiometricService {
             .eq('id', existingTemplate['id']);
       }
 
-      // Insert new template (NO template_version column)
-      final biometricData = {
+      // Insert new template — include organization_id if available
+      final biometricData = <String, dynamic>{
         'organization_member_id': organizationMemberId,
         'biometric_type': 'face_recognition',
-        'template_data': templateJson, // Version is inside this JSON
+        'template_data': templateJson,
         'enrollment_date': TimezoneHelper.formatUtcForSupabase(DateTime.now()),
         'is_active': true,
-        // ❌ REMOVED: 'template_version': version,
       };
+      if (organizationId != null) {
+        biometricData['organization_id'] = organizationId;
+      }
 
       final result = await _supabase
           .from('biometric_data')
@@ -120,9 +116,7 @@ class BiometricService {
           .select()
           .single();
 
-      // debugPrint('✅ Face template registered with version $version');
-
-      // ✅ Cache Invalidation: Clear cache so next identification fetches new data
+      // Cache Invalidation: Clear cache so next identification fetches new data
       _memoryTemplateCache = null;
       _parsedTemplateCache = null;
 
@@ -131,6 +125,7 @@ class BiometricService {
       throw Exception('Failed to register face template: $e');
     }
   }
+
 
   Future<BiometricData?> getActiveFaceTemplate(int organizationMemberId) async {
     try {
